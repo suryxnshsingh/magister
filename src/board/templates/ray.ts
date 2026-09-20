@@ -205,7 +205,11 @@ export function createRay(
     createDraw(`${id}.interface`, iface, at, 560),
     ...(surface ? [createDraw(`${id}.surface`, surface, at + 300, 500)] : []),
     createDraw(`${id}.normal`, normal, at + 480, 420),
-    createFadeIn(`${id}.media`, [medTop, medBot], at + 760, 300),
+    // One fade per part, not one for both: an animation is named for the part
+    // it reveals, and that name is how the board knows whether a part the
+    // teacher points at is actually up yet.
+    createFadeIn(`${id}.n1`, [medTop], at + 760, 300),
+    createFadeIn(`${id}.n2`, [medBot], at + 760, 300),
   ]);
 
   steps.set('incident', (at) => [
@@ -238,6 +242,7 @@ export function createRay(
   ]);
 
   return {
+    root: f.root,
     parts: f.parts,
     steps,
     stepNames: [...steps.keys()],
@@ -272,5 +277,10 @@ registerFigure('ray', {
     'n2',
   ],
   steps: ['setup', 'incident', 'refract', 'reflect'],
+  stepNotes: {
+    incident: 'the incoming ray and the angle of incidence',
+    refract: 'the refracted ray, bent by Snell’s law',
+    reflect: 'the reflected ray, equal angle on the far side — the mirror case',
+  },
   build: createRay,
 });

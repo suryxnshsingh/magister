@@ -12,7 +12,7 @@
  * during a lesson is just silence.
  */
 import { measure } from '@/board/math/mathjax';
-import type { MarkStyle, Op } from '@/board/oplog';
+import { baseId, type MarkStyle, type Op } from '@/board/oplog';
 import type { Scene } from '@/board/scene';
 import { SHAPES } from '@/board/draw-shapes';
 import { figureNames, getFigure } from '@/board/templates';
@@ -22,8 +22,16 @@ import { evaluate } from './calc';
 import { normaliseContent } from './latex';
 
 export interface DispatchResult {
-  /** The op to schedule, if this call draws anything. */
-  op: Op | null;
+  /**
+   * The ops to apply, in order, if this call changes the board.
+   *
+   * A list rather than one op because a few calls are genuinely two acts: a
+   * new figure has to clear the one already filling the column before it can
+   * be drawn. Emitting both keeps the log honest about what was destroyed,
+   * which the replay needs, and it keeps them in order without asking the
+   * scheduler to hold two calls apart.
+   */
+  ops: Op[];
   response: Record<string, unknown>;
   /** Blocking tools must resume generation; board ops must not. */
   resume: boolean;
@@ -35,6 +43,26 @@ const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String
 
 const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box'];
 
+/** Every id still on the board, in the order the teacher put them there. */
+function liveIds(scene: Scene): string[] {
+  return [...scene.objects.keys(), ...scene.drawings.keys(), ...scene.figures.keys()].filter(
+    (id) => !scene.erased.has(id),
+  );
+}
+
+/**
+ * The erase a new figure needs before it can be drawn.
+ *
+ * A template fills the figure column — that is how they are all laid out — so
+ * a second one does not sit beside the first, it sits ON it: two sets of rays,
+ * two sets of labels, one unreadable board. There is no arrangement where both
+ * survive, so the old one goes, and the reply says so rather than leaving the
+ * teacher to refer back to a diagram that was wiped out from under it.
+ */
+function clearFigures(scene: Scene, now: number): Op[] {
+  return scene.liveFigures().map((id) => ({ kind: 'erase', t: now, target: id }) as Op);
+}
+
 export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchResult {
   const a = call.args;
 
@@ -43,7 +71,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       const id = str(a.id) || `line${scene.objects.size + 1}`;
       const raw = str(a.content);
       if (!raw) {
-        return { op: null, resume: false, note: 'write with no content', response: { ok: false, error: 'content was empty' } };
+        return { ops: [], resume: false, note: 'write with no content', response: { ok: false, error: 'content was empty' } };
       }
       const { latex, wasCorrupted } = normaliseContent(raw);
       // Measure before placing: the layout manager needs the height to know
@@ -63,7 +91,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
 
       const op: Op = { kind: 'write', t: now, id: finalId, content: latex, place };
       return {
-        op,
+        ops: [op],
         resume: false,
         note: `write ${finalId} ${place.intent}`,
         response: {
@@ -80,24 +108,61 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
     case 'point':
     case 'mark': {
       const target = str(a.target);
+      // Erased ink is still in the DOM — that is what makes the board seekable
+      // — so it still resolves to a box. Pointing at it would tap a wiped part
+      // of the board, which from the student's side is pointing at nothing.
+      if (scene.erased.has(baseId(target))) {
+        return {
+          ops: [],
+          resume: false,
+          note: `${call.name} -> "${target}" was erased`,
+          response: {
+            ok: false,
+            error: `"${target}" was erased — it is not on the board any more`,
+            onBoard: liveIds(scene),
+          },
+        };
+      }
       const box = scene.boxOf(target);
       if (!box) {
         // Deixis never errors, but the model must learn the id was wrong —
         // otherwise it keeps pointing at something that does not exist.
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `${call.name} -> unknown target "${target}"`,
           response: {
             ok: false,
             error: `nothing on the board called "${target}"`,
-            onBoard: [...scene.objects.keys()],
+            onBoard: liveIds(scene),
+          },
+        };
+      }
+      // The box resolved, which is not the same as the chalk being there: a
+      // figure builds every part up front and hides it until its step. Circling
+      // one that has not been revealed draws a ring around empty slate — which
+      // is exactly what happened to a ray diagram whose rays were never
+      // stepped in.
+      const hidden = scene.hiddenPart(target);
+      if (hidden) {
+        const fig = scene.figures.get(hidden.figure);
+        return {
+          ops: [],
+          resume: false,
+          note: `${call.name} -> "${target}" is not drawn yet`,
+          response: {
+            ok: false,
+            error: `"${target}" is part of that figure but is NOT drawn yet — nothing was ${call.name === 'point' ? 'pointed at' : 'marked'}`,
+            ...(hidden.step
+              ? { fix: `call step id="${hidden.figure}" step="${hidden.step}" first, then point or mark it` }
+              : {}),
+            drawn: fig ? [...fig.shown] : [],
           },
         };
       }
       if (call.name === 'point') {
         return {
-          op: { kind: 'point', t: now, target },
+          ops: [{ kind: 'point', t: now, target }],
           resume: false,
           note: `point ${target}`,
           response: { ok: true, target },
@@ -108,7 +173,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
         ? (wanted as MarkStyle)
         : 'circle';
       return {
-        op: { kind: 'mark', t: now, id: `${target}-${style}-${Math.round(now)}`, target, style },
+        ops: [{ kind: 'mark', t: now, id: `${target}-${style}-${Math.round(now)}`, target, style }],
         resume: false,
         note: `mark ${style} ${target}`,
         response: { ok: true, target, style, ...(style !== wanted ? { note: `"${wanted}" is not a style; used circle` } : {}) },
@@ -120,7 +185,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       const shape = str(a.shape).toLowerCase();
       if (!(SHAPES as string[]).includes(shape)) {
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `draw -> unknown shape "${shape}"`,
           response: { ok: false, error: `"${shape}" is not a shape`, shapes: SHAPES },
@@ -132,24 +197,26 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       // recover. Answering ok and drawing nothing is how a teacher ends up
       // describing a diagram that is not there.
       const known = (ref: string) =>
-        !ref || /^\s*-?[\d.]+\s*,\s*-?[\d.]+\s*$/.test(ref) || scene.anchorOf(ref) !== null;
+        !ref ||
+        /^\s*-?[\d.]+\s*,\s*-?[\d.]+\s*$/.test(ref) ||
+        (!scene.erased.has(baseId(ref)) && scene.anchorOf(ref) !== null);
       const bad = [from, str(a.to), str(a.to2)].filter((r) => r && !known(r));
       if (!known(from)) {
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `draw -> unknown anchor "${from}"`,
           response: {
             ok: false,
             error: `nothing on the board called "${from}" — nothing was drawn`,
-            onBoard: [...scene.drawings.keys(), ...scene.objects.keys()],
+            onBoard: liveIds(scene),
             hint: 'use "x,y" from 0 to 1 for the first shape of a diagram',
           },
         };
       }
       const a0 = scene.anchorOf(from);
       return {
-        op: {
+        ops: [{
           kind: 'draw',
           t: now,
           id,
@@ -161,7 +228,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           colour: (['chalk', 'dim', 'accent'] as string[]).includes(str(a.colour))
             ? (str(a.colour) as 'chalk' | 'dim' | 'accent')
             : undefined,
-        },
+        }],
         resume: false,
         note: `draw ${shape} ${id}`,
         response: {
@@ -185,7 +252,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       // same turn, by building the explanation out of write and mark instead.
       if (!spec) {
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `scene -> no figure "${name}"`,
           response: {
@@ -196,16 +263,27 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           },
         };
       }
+      const replaced = scene.liveFigures();
       return {
-        op: { kind: 'scene', t: now, id, name, params: str(a.params) },
+        ops: [...clearFigures(scene, now), { kind: 'scene', t: now, id, name, params: str(a.params) }],
         resume: false,
-        note: `scene ${id} ${name} ${str(a.params)}`,
+        note: `scene ${id} ${name} ${str(a.params)}${replaced.length ? ` (cleared ${replaced.join(' ')})` : ''}`,
         response: {
           ok: true,
           id,
+          // Never silently: the teacher has to know the old diagram is gone,
+          // or it will keep pointing into it.
+          ...(replaced.length
+            ? { cleared: `${replaced.join(', ')} had to be wiped — a figure fills the whole column` }
+            : {}),
           // Naming the parts is what lets the teacher point INTO the figure.
           parts: spec.parts.map((p) => `${id}.${p}`),
-          steps: spec.steps,
+          // A figure arrives with its setup and nothing else. Reporting the
+          // rest as "steps" reads as a menu; reporting it as not drawn yet is
+          // the truth, and it is the difference between a ray diagram with
+          // rays and one the teacher only talks about.
+          drawn: 'setup',
+          notDrawnYet: spec.steps.filter((st) => st !== 'setup'),
         },
       };
     }
@@ -213,13 +291,14 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
     case 'step': {
       const id = str(a.id);
       const step = str(a.step);
-      const tpl = scene.templates.get(id);
+      const fig = scene.onBoard(id) ? scene.figures.get(id) : undefined;
+      const tpl = fig?.tpl;
       if (!tpl) {
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `step -> no figure "${id}"`,
-          response: { ok: false, error: `no figure called "${id}"`, figures: [...scene.templates.keys()] },
+          response: { ok: false, error: `no figure called "${id}" on the board`, figures: scene.liveFigures() },
         };
       }
       // Same reasoning as an unregistered figure: a step name the template does
@@ -227,7 +306,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       // narrating a part of the diagram that never appeared.
       if (!tpl.stepNames.includes(step)) {
         return {
-          op: null,
+          ops: [],
           resume: false,
           note: `step -> "${id}" has no step "${step}"`,
           response: {
@@ -237,18 +316,70 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           },
         };
       }
+      // A step fired twice draws nothing the second time — the animations are
+      // already primed — so answering `ok` would tell the teacher chalk moved
+      // when it did not, and it would go on to point at a part it thinks it
+      // just revealed. Say it is already up instead.
+      if (fig.shown.has(step)) {
+        return {
+          ops: [],
+          resume: false,
+          note: `step ${id}.${step} -> already drawn`,
+          response: {
+            ok: true,
+            id,
+            step,
+            note: 'that stage was already on the board — nothing new was drawn',
+            notDrawnYet: tpl.stepNames.filter((s) => !fig.shown.has(s)),
+          },
+        };
+      }
       return {
-        op: { kind: 'step', t: now, id, step },
+        ops: [{ kind: 'step', t: now, id, step }],
         resume: false,
         note: `step ${id}.${step}`,
         response: { ok: true, id, step },
       };
     }
 
+    case 'erase': {
+      const target = str(a.target).trim() || 'board';
+      const gone = scene.eraseTargets(target);
+      // Saying `ok` to an erase that took nothing away would have the teacher
+      // believing it has room it does not have, and writing into the mess.
+      if (!gone.length) {
+        return {
+          ops: [],
+          resume: false,
+          note: `erase -> nothing called "${target}"`,
+          response: {
+            ok: false,
+            error:
+              target.toLowerCase() === 'board'
+                ? 'the board is already empty — nothing was erased'
+                : `nothing on the board called "${target}" — nothing was erased`,
+            onBoard: liveIds(scene),
+          },
+        };
+      }
+      return {
+        ops: [{ kind: 'erase', t: now, target }],
+        resume: false,
+        note: `erase ${target} (${gone.join(' ')})`,
+        response: {
+          ok: true,
+          erased: gone,
+          // Anything drawn around what went goes with it; a circle left on a
+          // cleared board is the thing being pointed at now being nothing.
+          note: 'anything marking those went too, and the space is free again',
+        },
+      };
+    }
+
     case 'calc': {
       const r = evaluate(str(a.expr));
       return {
-        op: null,
+        ops: [],
         // BLOCKING: generation stopped for this, so it must be told to carry on.
         resume: true,
         note: `calc ${str(a.expr)} = ${r.ok ? r.text : r.error}`,
@@ -260,7 +391,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
 
     default:
       return {
-        op: null,
+        ops: [],
         resume: false,
         note: `unknown tool ${call.name}`,
         response: { ok: false, error: `no tool called "${call.name}"` },
@@ -271,13 +402,32 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
 /**
  * What the model is told the board looks like.
  *
- * Kept short — it rides on tool responses, and every token here is one the
- * teacher could have spent talking.
+ * The model cannot see the board, so this is its only picture of it, and a
+ * picture that stops at "there is a figure called fig" is how a teacher ends
+ * up describing rays it never revealed. A figure therefore reports what it is
+ * and, more importantly, what of it is still NOT drawn — step names, because
+ * those are the thing the teacher can actually act on.
+ *
+ * Still kept short. It rides on every tool response, and every token here is
+ * one the teacher could have spent talking, so the parts are left out: `scene`
+ * named them once, and the point/mark guard names the missing one at the
+ * moment it matters.
  */
 export function boardSummary(scene: Scene): string {
-  const lines = [...scene.objects.values()].map(
-    (o) => `${o.id}: ${o.content}${o.partial ? ' [PARTIAL — you were interrupted]' : ''}`,
+  const lines = [...scene.objects.values()]
+    .filter((o) => !scene.erased.has(o.id))
+    .map((o) => `${o.id}: ${o.content}${o.partial ? ' [PARTIAL — you were interrupted]' : ''}`);
+  const figs = [...scene.figures.entries()].filter(([id]) => !scene.erased.has(id)).map(([id, f]) => {
+    const left = f.tpl.stepNames.filter((s) => !f.shown.has(s));
+    return (
+      `${id}: ${f.name} figure, drawn: ${[...f.shown].join(' ') || 'nothing yet'}` +
+      (left.length ? ` — NOT drawn yet: ${left.join(' ')} (call step)` : '')
+    );
+  });
+  const sketch = [...scene.drawings.keys()].filter((id) => !scene.erased.has(id));
+  return (
+    [...lines, ...figs, sketch.length ? `sketched: ${sketch.join(' ')}` : '']
+      .filter(Boolean)
+      .join('\n') || '(board is empty)'
   );
-  const figs = [...scene.templates.keys()].map((f) => `${f} (figure)`);
-  return [...lines, ...figs].join('\n') || '(board is empty)';
 }

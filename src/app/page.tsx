@@ -279,11 +279,11 @@ export default function Session() {
      */
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
-      if (r.op) {
-        scene.applyOp(r.op);
+      for (const op of r.ops) {
+        scene.applyOp(op);
         // Recorded here, at the moment the chalk moves, so the replay has the
         // rhythm the student heard rather than the socket's 5–13s lead.
-        recRef.current?.add(r.op);
+        recRef.current?.add(op);
       }
       push('system', r.note);
       // The reply describes what actually happened, so it is sent now rather

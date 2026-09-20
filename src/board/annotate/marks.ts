@@ -80,12 +80,18 @@ function buildPaths(style: MarkStyle, b: BBox, pad: number, strokeWidth: number)
 /**
  * `box()` is read at init, not at construction, so a mark can be scheduled
  * before the thing it marks has been typeset and measured.
+ *
+ * `host` is made and placed by the caller rather than here, because init runs
+ * at prime time — which on the replay path is after the whole log has been
+ * compiled. A mark that created its own group would not exist in the DOM while
+ * the log was still being read, so an erase earlier in that log could not know
+ * to wipe it, and a cleared board would replay with its annotations still on.
  */
 export function createMark(
   id: string,
   style: MarkStyle,
   box: () => BBox | null,
-  layer: SVGGElement,
+  host: SVGGElement,
   start: number,
   opts: MarkOptions = {},
 ): MarkAnimation {
@@ -104,19 +110,15 @@ export function createMark(
   function init() {
     const b = box();
     if (!b) return;
-    const group = document.createElementNS(SVG_NS, 'g');
-    group.setAttribute('data-mark', id);
-    group.setAttribute('fill', 'none');
     for (const p of buildPaths(style, b, pad, strokeWidth)) {
       const el = document.createElementNS(SVG_NS, 'path');
       el.setAttribute('d', p.d);
       el.setAttribute('stroke', color);
       el.setAttribute('stroke-width', String(p.strokeWidth || strokeWidth));
       el.setAttribute('stroke-linecap', 'round');
-      group.appendChild(el);
+      host.appendChild(el);
       els.push(el);
     }
-    layer.appendChild(group);
     lens = els.map((e) => e.getTotalLength());
     els.forEach((e, i) => {
       e.style.strokeDasharray = String(lens[i]);

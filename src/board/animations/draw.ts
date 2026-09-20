@@ -10,6 +10,7 @@
  * changes how much of them is showing. That keeps every step of a template
  * idempotent and seekable, which is what the scene clock requires.
  */
+import { bboxIn, type BBox } from '../annotate/marks';
 import { clamp01, easeOutCubic, type Animation, type Segment } from '../clock';
 import type { Pt } from '../units';
 
@@ -90,6 +91,68 @@ export function createFadeIn(
   }
   const segments: Segment[] = [{ at: start, from: 0, len: duration }];
   return { id, segments, duration, init, apply };
+}
+
+/**
+ * Wipe elements off the board, left to right, the way a duster crosses it.
+ *
+ * Opacity, never removal. The scene is a pure function of time, so scrubbing
+ * back past an erase has to put the ink back — which it cannot do if the nodes
+ * are gone. What an erase really destroys is the board's *memory*: the
+ * registries the teacher's ids resolve against. The chalk just fades.
+ *
+ * The sweep is staggered by x so it reads as one gesture across the board
+ * rather than everything blinking out together, which looks like a fault.
+ */
+export function createWipe(
+  id: string,
+  els: SVGGraphicsElement[],
+  root: SVGSVGElement,
+  start: number,
+  duration = 760,
+): DrawAnimation {
+  /** How much of the sweep any one element spends fading. */
+  const SMEAR = 0.3;
+  let lanes: { el: SVGGraphicsElement; from: number }[] = [];
+  let band: { x0: number; x1: number; y: number } | null = null;
+  let ready = false;
+
+  function init() {
+    const seen = els
+      .map((el) => ({ el, b: bboxIn(el, root) }))
+      .filter((e): e is { el: SVGGraphicsElement; b: BBox } => e.b !== null);
+    if (seen.length) {
+      const x0 = Math.min(...seen.map((e) => e.b.x));
+      const x1 = Math.max(...seen.map((e) => e.b.x + e.b.w));
+      const y0 = Math.min(...seen.map((e) => e.b.y));
+      const y1 = Math.max(...seen.map((e) => e.b.y + e.b.h));
+      band = { x0, x1, y: (y0 + y1) / 2 };
+      const span = Math.max(1, x1 - x0);
+      lanes = seen.map(({ el, b }) => ({
+        el,
+        from: ((b.x + b.w / 2 - x0) / span) * (1 - SMEAR),
+      }));
+    }
+    ready = true;
+  }
+
+  function apply(t: number) {
+    if (!ready) return;
+    const u = clamp01(t / duration);
+    for (const l of lanes) {
+      l.el.style.opacity = String(1 - clamp01((u - l.from) / SMEAR));
+    }
+  }
+
+  /** The duster's position, so the hand crosses the board with it. */
+  function penAt(t: number): Pt | null {
+    if (!ready || !band) return null;
+    const u = clamp01(t / duration);
+    return { x: band.x0 + (band.x1 - band.x0) * u, y: band.y };
+  }
+
+  const segments: Segment[] = [{ at: start, from: 0, len: duration }];
+  return { id, segments, duration, init, apply, penAt };
 }
 
 /**

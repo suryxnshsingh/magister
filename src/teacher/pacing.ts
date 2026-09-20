@@ -40,6 +40,12 @@ export function startEarlyMs(name: string, args: Record<string, unknown>): numbe
       return 2200;
     case 'step':
       return 900;
+    case 'erase':
+      // Ahead of everything else it could be batched with, because an erase is
+      // preparation: the model says "chalo, ab reflection dekhte hain" and
+      // emits the clear and what replaces it in the same breath. Firing them
+      // in the wrong order would wipe the new work instead of the old.
+      return 2600;
     case 'mark':
       // "...aur ye kabhi change nahi hoti" — the underline should be landing
       // as the clause ends, so it starts a beat before.

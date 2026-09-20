@@ -27,6 +27,12 @@ export interface FigureSpec {
    */
   parts: string[];
   steps: string[];
+  /**
+   * One phrase per reveal step, for the model choosing between them. Knowing
+   * that `reflect` exists is not the same as knowing it is the one to call for
+   * a mirror, and a realtime model picks a step name mid-sentence.
+   */
+  stepNotes?: Record<string, string>;
   build(
     id: string,
     layer: SVGGElement,
@@ -49,11 +55,64 @@ export function figureNames(): string[] {
   return [...REGISTRY.keys()];
 }
 
-/** The catalogue, written for the model rather than for us. */
+/**
+ * The catalogue, written for the model rather than for us.
+ *
+ * The reveal steps are named here and not only in the `scene` reply, because
+ * that reply is sent when the chalk moves — five to thirteen seconds after the
+ * call, by which time the turn that would have used them is already generated.
+ * A figure whose steps the teacher learns too late is a figure that never gets
+ * past its setup.
+ */
 export function describeFigures(): string {
   return [...REGISTRY.entries()]
-    .map(([name, f]) => `"${name}" — ${f.description} params: ${f.params}`)
+    .map(
+      ([name, f]) =>
+        `"${name}" — ${f.description} params: ${f.params}. ` +
+        `reveal steps: ${revealSteps(f).join(', ') || 'none'}`,
+    )
     .join(' | ');
+}
+
+/** Everything after `setup`, which `scene` fires for you. */
+function revealSteps(f: FigureSpec): string[] {
+  return f.steps.filter((s) => s !== 'setup');
+}
+
+/** The steps, per figure, for the tool that fires them. */
+export function describeSteps(): string {
+  return [...REGISTRY.entries()]
+    .map(([name, f]) => {
+      const steps = revealSteps(f).map((s) =>
+        f.stepNotes?.[s] ? `${s} (${f.stepNotes[s]})` : s,
+      );
+      return `${name}: ${steps.join(', ') || 'none'}`;
+    })
+    .join('. ');
+}
+
+/**
+ * Which step reveals which part.
+ *
+ * Every piece of a figure is built up front and hidden, so a part's address
+ * resolving is not the same as the part being on the board: `fig.incident`
+ * gives a perfectly good bounding box while the ray is still invisible. The
+ * answer is in the steps — a step's animations are named `<figure>.<part>`,
+ * the same address `point` and `mark` use — so asking each step what it would
+ * return says which parts it puts up.
+ *
+ * Safe to ask: a step factory only constructs animations. Nothing touches the
+ * DOM until the clock calls `init`, and these are thrown away.
+ */
+export function stepOfPart(id: string, tpl: Template): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const step of tpl.stepNames) {
+    for (const a of tpl.steps.get(step)?.(0) ?? []) {
+      const part = a.id.startsWith(`${id}.`) ? a.id.slice(id.length + 1) : '';
+      if (tpl.parts.has(part) && !out.has(part)) out.set(part, step);
+    }
+  }
+  return out;
 }
 
 /**

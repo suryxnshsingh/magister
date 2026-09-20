@@ -20,6 +20,7 @@ import {
   figureNames,
   getFigure,
   parseParams,
+  stepOfPart,
 } from '@/board/templates';
 import type { Template } from '@/board/templates/projectile';
 import { CANVAS_H, CANVAS_W, FIGURE, toPx } from '@/board/units';
@@ -63,12 +64,23 @@ export default function FigureTest() {
     const extraP = tpl.partNames.filter((p) => !spec.parts.includes(p));
     const missS = spec.steps.filter((s) => !tpl.stepNames.includes(s));
     const extraS = tpl.stepNames.filter((s) => !spec.steps.includes(s));
+    // A part is only addressable once some step has drawn it, and the board
+    // works out which step from the animation's name. A part no step names is
+    // therefore either a mis-named animation or — as with the refracted ray
+    // under total internal reflection — a part that correctly never appears.
+    const reveals = stepOfPart('fig', tpl);
+    const unreached = tpl.partNames.filter((p) => !reveals.has(p));
+    const strayNotes = Object.keys(spec.stepNotes ?? {}).filter(
+      (s) => !tpl.stepNames.includes(s),
+    );
     setDrift(
       [
         missP.length && `declared parts not built: ${missP.join(', ')}`,
         extraP.length && `built parts not declared: ${extraP.join(', ')}`,
         missS.length && `declared steps not built: ${missS.join(', ')}`,
         extraS.length && `built steps not declared: ${extraS.join(', ')}`,
+        unreached.length && `no step reveals: ${unreached.join(', ')}`,
+        strayNotes.length && `notes for steps that do not exist: ${strayNotes.join(', ')}`,
       ]
         .filter(Boolean)
         .join(' · '),

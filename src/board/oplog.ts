@@ -130,6 +130,14 @@ export type Op =
   | StepOp
   | EraseOp;
 
+/**
+ * The board id a target names, whichever way it is addressed: "ux",
+ * "ux:u\cos\theta" and "fig.incident" all belong to something erasable.
+ */
+export function baseId(target: string): string {
+  return parseTarget(target).id.split('.')[0];
+}
+
 /** Split "ux:u\cos\theta" into its object id and optional sub-expression. */
 export function parseTarget(target: string): { id: string; part?: string } {
   const i = target.indexOf(':');

@@ -33,6 +33,8 @@ const DIM = '#cfc9b6';
 const YELLOW = '#f0d264';
 
 export interface Template {
+  /** The whole figure, as one element — what an erase wipes. */
+  root: SVGGElement;
   /** Named, addressable pieces — what `point`/`mark` resolve `fig.x` against. */
   parts: Map<string, SVGGraphicsElement>;
   /** Named steps, each a factory so the caller supplies the scene time. */
@@ -198,6 +200,7 @@ export function createProjectile(
   ]);
 
   return {
+    root,
     parts,
     steps,
     stepNames: [...steps.keys()],
@@ -212,6 +215,11 @@ registerFigure('projectile', {
   params: 'u=20, theta=30, g=10',
   parts: ['ground', 'trajectory', 'u', 'theta', 'ux', 'uy', 'apex', 'v_apex', 'range', 'ball'],
   steps: ['setup', 'components', 'apex_velocity', 'launch'],
+  stepNotes: {
+    components: 'u resolved into horizontal and vertical',
+    apex_velocity: 'what is left of the velocity at the top',
+    launch: 'the range, and the ball flying the arc',
+  },
   build: (id, layer, params, toPx) =>
     createProjectile(
       id,

@@ -17,11 +17,12 @@
  */
 import type { ToolDeclaration } from '@/voice/session';
 import { SHAPES } from '@/board/draw-shapes';
-import { describeFigures, figureNames } from '@/board/templates';
 // The catalogue below is generated from the figure registry, so the model is
-// never told about a figure that does not exist.
-import '@/board/templates/projectile';
-import '@/board/templates/graph';
+// never told about a figure that does not exist. Registration rides on the
+// barrel, which is the one place that does it — the direct figure imports that
+// used to sit here were a second list of the same thing, already missing
+// `ray`, and only harmless because the barrel had it covered.
+import { describeFigures, describeSteps, figureNames } from '@/board/templates';
 
 export const TEACHER_TOOLS: ToolDeclaration[] = [
   {
@@ -130,7 +131,11 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'Use one only when it fits what the student is on; for anything else ' +
       'build the explanation with write, point and mark. It appears instantly, ' +
       'so keep talking over it and never announce a pause. ' +
-      'Every part is addressable afterwards as "<id>.<part>" for point/mark.',
+      'IT ARRIVES HALF-DRAWN: you get the setup only, and the reveal steps ' +
+      'listed above are NOT on the board until you call step for each one — a ' +
+      'ray diagram has no rays until you do. Every part is addressable ' +
+      'afterwards as "<id>.<part>" for point/mark, but only once the step that ' +
+      'draws it has been called.',
     parameters: {
       id: { type: 'string', description: 'Id for the figure, e.g. "fig".' },
       name: {
@@ -148,13 +153,33 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
     name: 'step',
     description:
       'Reveal the next stage of a figure as you explain it, at the moment you ' +
-      'say the words. projectile: components, apex_velocity, launch. ' +
-      'graph: area (shades under the curve), slope (draws a tangent).',
+      'say the words. Until you call it that stage is not on the board and you ' +
+      'must not point at it or talk about it as if it were. Steps by figure — ' +
+      describeSteps() + '. Work through them in order as your explanation ' +
+      'reaches each one.',
     parameters: {
       id: { type: 'string', description: 'The figure id.' },
       step: { type: 'string', description: 'Step name.' },
     },
     required: ['id', 'step'],
+  },
+  {
+    name: 'erase',
+    description:
+      'Wipe the board, or one thing off it. "board" clears everything and gives ' +
+      'you a clean surface; an id erases just that line, sketch or figure, and ' +
+      'anything drawn around it. Use it when you finish one idea and start ' +
+      'another, the way you would rub out the last question before the next — ' +
+      'and when you have written down most of the board. Once erased, a thing ' +
+      'is gone: you cannot point at it or refer to it again. You never need it ' +
+      'before a prepared figure, since a new one clears the old by itself.',
+    parameters: {
+      target: {
+        type: 'string',
+        description: '"board" for all of it, or the id of one thing, e.g. "ux".',
+      },
+    },
+    required: ['target'],
   },
   {
     name: 'calc',
@@ -210,6 +235,10 @@ While saying exactly that you would silently write the current relation, underli
 Physics is not equations with occasional pictures. If the thing you are explaining has a picture — and it almost always does — draw it.
 
 You are never stuck for a diagram. If a prepared figure fits, use \`scene\`; it knows its own physics. For everything else use \`draw\`, one shape at a time, building the picture up as you talk: a block, then the forces on it; a wire, then the cell, then the resistor; a surface, then the ray coming in. Anchor each new shape to something already drawn by its id, so you never have to think about positions.
+
+The board is not infinite, and you clear it yourself. When you finish one idea and move to a different one, erase what the new one does not need — \`erase\` with "board" for a clean surface, or with an id to take one line off. Keep anything you are still going to refer back to; wipe the rest. A teacher who never touches the duster ends up writing over their own working, and once the board is a mess the student stops reading it.
+
+A \`scene\` figure ARRIVES HALF-DRAWN. You get the bare setup — the surface, the axes, the ground — and every other part of it stays invisible until you call \`step\` for it. So step through them as your explanation reaches each one. A ray diagram with no rays, or a graph with nothing shaded, is a diagram you are talking about and the student cannot see.
 
 Build a diagram up piece by piece rather than describing it and drawing it at the end. A student watching a free-body diagram appear force by force is learning where the forces come from; the same diagram arriving complete is just a picture.
 

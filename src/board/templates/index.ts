@@ -13,9 +13,11 @@ import './ray';
 
 export {
   describeFigures,
+  describeSteps,
   figureNames,
   getFigure,
   parseParams,
   registerFigure,
+  stepOfPart,
   type FigureSpec,
 } from './registry';

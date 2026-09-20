@@ -201,13 +201,16 @@ export function createGraph(
   const steps = new Map<string, (at: number) => Animation[]>();
   steps.set('setup', (at) => [
     createDraw(`${id}.axes`, axes, at, 520),
-    createFadeIn(`${id}.axislabels`, [xLab, yLab], at + 320, 300),
+    // Named for the parts they reveal — see the note in ray.ts.
+    createFadeIn(`${id}.xlabel`, [xLab], at + 320, 300),
+    createFadeIn(`${id}.ylabel`, [yLab], at + 320, 300),
     createDraw(`${id}.curve`, curve, at + 520, 1100),
   ]);
   steps.set('area', (at) => [createDraw(`${id}.area`, area, at, 900)]);
   steps.set('slope', (at) => [createDraw(`${id}.tangent`, tangent, at, 520)]);
 
   return {
+    root,
     parts,
     steps,
     stepNames: [...steps.keys()],
@@ -222,5 +225,9 @@ registerFigure('graph', {
   params: 'fn=2*t, from=0, to=5, xlabel=time (s), ylabel=velocity (m/s), at=3',
   parts: ['axes', 'curve', 'area', 'tangent', 'xlabel', 'ylabel'],
   steps: ['setup', 'area', 'slope'],
+  stepNotes: {
+    area: 'shades the area under the curve',
+    slope: 'draws the tangent at x = at',
+  },
   build: createGraph,
 });

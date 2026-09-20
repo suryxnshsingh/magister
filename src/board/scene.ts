@@ -11,16 +11,16 @@
  * earlier. That registry is also what the board summary is derived from when
  * the model needs reminding what it has already put on the board.
  */
-import { createDraw, createFadeIn } from './animations/draw';
+import { createDraw, createFadeIn, createWipe } from './animations/draw';
 import { createWrite, type WriteAnimation } from './animations/write';
 import { bboxIn, createMark, unionBox, type BBox } from './annotate/marks';
 import { interruptAt, resumeAt, SceneClock, type Animation } from './clock';
 import { handJitter, roughenGlyphs } from './chalk/roughen';
 import { findPart, typeset, DEFAULT_EM } from './math/mathjax';
-import { OpLog, parseTarget, type Op, type Placement } from './oplog';
+import { baseId, OpLog, parseTarget, type Op, type Placement } from './oplog';
 import { PenTrack, tapWindow, windowsOf, type PenWindow } from './pen';
 import { type Template } from './templates/projectile';
-import { getFigure, parseParams } from './templates';
+import { getFigure, parseParams, stepOfPart } from './templates';
 // Importing these registers them; without it the catalogue is empty.
 import { normaliseContent } from '@/teacher/latex';
 import { BOTTOM, DERIVATION, FIGURE, toPx, type Pt } from './units';
@@ -50,6 +50,24 @@ export interface BoardObject {
   partial: boolean;
 }
 
+/**
+ * A figure on the board, and how much of it is actually drawn.
+ *
+ * A template builds every piece up front and hides it; a step reveals what it
+ * owns. So holding the template is not enough to answer the only question the
+ * teacher keeps getting wrong — is this part on the board yet — and that
+ * answer is what `point` and `mark` are checked against.
+ */
+export interface SceneFigure {
+  /** The registry name: "ray", where the id is "fig". */
+  name: string;
+  tpl: Template;
+  /** Steps whose chalk has actually gone up. */
+  shown: Set<string>;
+  /** Which step reveals each part, so an invisible one can name its cure. */
+  stepOf: Map<string, string>;
+}
+
 export interface SceneLayers {
   /** Typeset maths and prose. */
   ink: SVGGElement;
@@ -62,9 +80,21 @@ export interface SceneLayers {
 export class Scene {
   readonly clock = new SceneClock();
   readonly objects = new Map<string, BoardObject>();
-  readonly templates = new Map<string, Template>();
+  readonly figures = new Map<string, SceneFigure>();
   /** Freehand primitives, addressable by bare id like everything else. */
   readonly drawings = new Map<string, SVGGElement>();
+  /** Annotation marks, by op id, with what each one was drawn around. */
+  readonly marks = new Map<string, { el: SVGGElement; target: string }>();
+  /**
+   * Ids that have been wiped.
+   *
+   * A flag, not a deletion. The registries have to keep resolving — a mark
+   * made at 0:20 is still compiled against a board that was cleared at 1:30,
+   * and deleting the entry would silently drop it from every replay. What
+   * erasing takes away is the teacher's right to refer to it, and that is a
+   * question the dispatcher asks here.
+   */
+  readonly erased = new Set<string>();
   pen: PenTrack = new PenTrack([]);
 
   constructor(
@@ -134,7 +164,7 @@ export class Scene {
       }
       case 'mark':
         this.clock.add(
-          createMark(op.id, op.style, () => this.boxOf(op.target), this.layers.marks, now, {
+          createMark(op.id, op.style, () => this.boxOf(op.target), this.hostMark(op.id, op.target), now, {
             color: op.color,
           }),
         );
@@ -152,17 +182,15 @@ export class Scene {
         break;
       }
       case 'scene': {
-        const spec = getFigure(op.name);
-        if (!spec) break;
-        const tpl = spec.build(op.id, this.layers.figures, parseParams(op.params), toPx);
-        this.templates.set(op.id, tpl);
-        for (const a of tpl.steps.get('setup')?.(now) ?? []) this.clock.add(a);
+        this.addFigure(op.id, op.name, op.params);
+        this.revealStep(op.id, 'setup', now);
         break;
       }
       case 'step':
-        for (const a of this.templates.get(op.id)?.steps.get(op.step)?.(now) ?? []) {
-          this.clock.add(a);
-        }
+        this.revealStep(op.id, op.step, now);
+        break;
+      case 'erase':
+        this.wipe(this.eraseTargets(op.target), now);
         break;
       default:
         break;
@@ -203,6 +231,151 @@ export class Scene {
       out.push(createFadeIn(`${op.id}:t`, built.fades, now + (built.paths.length ? 320 : 0), 260));
     }
     return out;
+  }
+
+  /** The group a mark draws into, owned here so an erase can find it. */
+  private hostMark(id: string, target: string): SVGGElement {
+    const el = document.createElementNS(SVG_NS, 'g');
+    el.setAttribute('data-mark', id);
+    el.setAttribute('fill', 'none');
+    this.layers.marks.appendChild(el);
+    this.marks.set(id, { el, target });
+    return el;
+  }
+
+  /**
+   * What an erase would take off the board: "board" for all of it, or one id.
+   *
+   * Pure — the dispatcher calls it to answer the model before the op fires, so
+   * naming what went and taking it away have to be separate acts.
+   */
+  eraseTargets(target: string): string[] {
+    const live = (id: string) => !this.erased.has(id);
+    const ids =
+      target.trim().toLowerCase() === 'board'
+        ? [...this.objects.keys(), ...this.drawings.keys(), ...this.figures.keys()]
+        : [target];
+    return ids.filter((id) => live(id) && this.holdersOf(id).length > 0);
+  }
+
+  /** Every element that makes up an id: its ink, plus anything marking it. */
+  private holdersOf(id: string): SVGGraphicsElement[] {
+    const out: SVGGraphicsElement[] = [];
+    const obj = this.objects.get(id);
+    if (obj) out.push(obj.holder);
+    const drawn = this.drawings.get(id);
+    if (drawn) out.push(drawn);
+    const fig = this.figures.get(id);
+    if (fig) out.push(fig.tpl.root);
+    if (!out.length) return out;
+    // An annotation outlives what it was drawn around unless it is taken with
+    // it, and a circle on an empty board is the failure this whole guard rail
+    // exists to stop.
+    for (const [markId, m] of this.marks) {
+      if (!this.erased.has(markId) && baseId(m.target) === id) {
+        out.push(m.el);
+      }
+    }
+    return out;
+  }
+
+  /** Is this id still on the board — drawn, and not since erased? */
+  onBoard(id: string): boolean {
+    return !this.erased.has(id) && this.holdersOf(id).length > 0;
+  }
+
+  /** The figures still up. At most one fits the column. */
+  liveFigures(): string[] {
+    return [...this.figures.keys()].filter((id) => !this.erased.has(id));
+  }
+
+  /** Wipe those ids: one sweep of the duster, and the board forgets them. */
+  private wipe(ids: string[], at: number): string[] {
+    const els = ids.flatMap((id) => this.holdersOf(id));
+    if (!els.length) return [];
+    for (const id of ids) {
+      this.erased.add(id);
+      for (const [markId, m] of this.marks) {
+        if (baseId(m.target) === id) this.erased.add(markId);
+      }
+    }
+    // Wide sweeps take longer, the way a real one does.
+    const wide = els.length > 2 || ids.some((id) => this.figures.has(id));
+    this.clock.add(createWipe(`erase:${ids.join('+')}:${at}`, els, this.root, at, wide ? 760 : 420));
+    this.reclaimColumn();
+    return ids;
+  }
+
+  /**
+   * Give the derivation column back the space the erased lines were using.
+   *
+   * Only the tail is reclaimed — the cursor drops to the lowest line still on
+   * the board. A hole in the middle stays a hole, because filling it would put
+   * a new line between two that are already spaced against each other.
+   */
+  private reclaimColumn(): void {
+    let y = DERIVATION.top;
+    for (const [id, o] of this.objects) {
+      if (this.erased.has(id)) continue;
+      y = Math.min(y, o.place.resolved.y - o.height - LINE_GAP);
+    }
+    this.cursorY = y;
+  }
+
+  /** Build a figure and start tracking how much of it is up. */
+  private addFigure(id: string, name: string, params: string): void {
+    const spec = getFigure(name);
+    if (!spec) return;
+    const tpl = spec.build(id, this.layers.figures, parseParams(params), toPx);
+    this.figures.set(id, {
+      name,
+      tpl,
+      shown: new Set(),
+      stepOf: stepOfPart(id, tpl),
+    });
+  }
+
+  /**
+   * Reveal one stage of a figure, and remember that it was revealed.
+   *
+   * The record is not bookkeeping for its own sake: it is what the model is
+   * told the board looks like. Without it a figure reports as present the
+   * moment `scene` lands, while three quarters of it is still invisible, and
+   * the teacher talks about rays nobody can see.
+   */
+  private revealStep(id: string, step: string, at: number): boolean {
+    const fig = this.figures.get(id);
+    const make = fig?.tpl.steps.get(step);
+    if (!fig || !make) return false;
+    for (const a of make(at)) this.clock.add(a);
+    fig.shown.add(step);
+    return true;
+  }
+
+  /**
+   * A figure part that resolves but is not on the board, and the step that
+   * would put it there. Null for anything genuinely drawn.
+   *
+   * Every piece of a figure exists in the DOM from the moment `scene` fires,
+   * hidden until its step. So `boxOf("fig.incident")` happily returns the box
+   * of a ray that was never drawn, and a circle lands on empty slate while the
+   * teacher says "yahan dekho". That is the same failure an unregistered
+   * figure and a bad anchor already report — caught one layer deeper.
+   */
+  hiddenPart(target: string): { figure: string; part: string; step: string | null } | null {
+    if (!target.includes('.')) return null;
+    const [figure, ...rest] = target.split('.');
+    const part = rest.join('.');
+    const fig = this.figures.get(figure);
+    const el = fig?.tpl.parts.get(part);
+    if (!fig || !el) return null;
+    const step = fig.stepOf.get(part) ?? null;
+    // A step already fired counts as drawn even if the chalk has not reached
+    // this part yet: a fade that has not begun still reads as invisible, and
+    // rejecting a mark on ink that is half a second away would be a lie in the
+    // other direction.
+    if (step && fig.shown.has(step)) return null;
+    return inked(el) ? null : { figure, part, step };
   }
 
   /**
@@ -287,8 +460,7 @@ export class Scene {
     // point into a construction rather than only at it.
     if (target.includes('.')) {
       const [tid, ...rest] = target.split('.');
-      const tpl = this.templates.get(tid);
-      const el = tpl?.parts.get(rest.join('.'));
+      const el = this.figures.get(tid)?.tpl.parts.get(rest.join('.'));
       return el ? bboxIn(el, this.root) : null;
     }
 
@@ -312,6 +484,9 @@ export class Scene {
     this.liveWrites.clear();
     this.liveTaps = [];
     this.drawings.clear();
+    this.figures.clear();
+    this.marks.clear();
+    this.erased.clear();
     this.layers.figures.replaceChildren();
     this.layers.ink.replaceChildren();
     this.layers.marks.replaceChildren();
@@ -343,7 +518,7 @@ export class Scene {
           break;
         case 'mark':
           this.clock.add(
-            createMark(op.id, op.style, () => this.boxOf(op.target), this.layers.marks, op.t, {
+            createMark(op.id, op.style, () => this.boxOf(op.target), this.hostMark(op.id, op.target), op.t, {
               color: op.color,
             }),
           );
@@ -365,18 +540,20 @@ export class Scene {
           break;
         }
         case 'scene': {
-          const spec = getFigure(op.name);
-          if (!spec) break;
-          const tpl = spec.build(op.id, this.layers.figures, parseParams(op.params), toPx);
-          this.templates.set(op.id, tpl);
-          for (const a of tpl.steps.get('setup')?.(op.t) ?? []) this.clock.add(a);
+          this.addFigure(op.id, op.name, op.params);
+          this.revealStep(op.id, 'setup', op.t);
           break;
         }
         case 'step': {
-          const tpl = this.templates.get(op.id);
-          for (const a of tpl?.steps.get(op.step)?.(op.t) ?? []) this.clock.add(a);
+          this.revealStep(op.id, op.step, op.t);
           break;
         }
+        case 'erase':
+          // Identical to the live path, and it can be, because an erase marks
+          // ids as gone rather than removing anything. Compiling the same log
+          // twice therefore wipes the same ink at the same time.
+          this.wipe(this.eraseTargets(op.target), op.t);
+          break;
         default:
           break;
       }
@@ -444,6 +621,23 @@ export class Scene {
       .map((o) => `${o.id}: "${o.content}"${o.partial ? ' [PARTIAL]' : ''}`)
       .join('\n');
   }
+}
+
+/**
+ * Is any of this part's chalk showing?
+ *
+ * Parts are built with `opacity: 0` and a step turns them on, so this is the
+ * board's own answer rather than ours — which is what catches a part no step
+ * happens to name, and a total-internal-reflection figure whose refracted ray
+ * is built and, correctly, never drawn.
+ */
+function inked(el: SVGGraphicsElement): boolean {
+  for (const child of Array.from(el.children)) {
+    const o = (child as SVGElement).style?.opacity;
+    // An empty string is nobody having hidden it, which means it is visible.
+    if (o === '' || Number(o) > 0.02) return true;
+  }
+  return false;
 }
 
 /**
