@@ -90,6 +90,65 @@ interface Line {
   text: string;
 }
 
+/**
+ * One round control, the shape every call has.
+ *
+ * Off is the loud state, not on: a muted microphone is the thing you need to
+ * see at a glance, so it fills instead of outlining. The label sits under the
+ * icon rather than in a tooltip, because a student who cannot find the mute
+ * button will simply keep talking into a dead mic.
+ */
+function CallButton({
+  on,
+  danger,
+  onClick,
+  label,
+  title,
+  children,
+}: {
+  on: boolean;
+  danger?: boolean;
+  onClick: () => void;
+  label: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  const lit = danger || !on;
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={danger ? undefined : on}
+      className="group flex flex-col items-center gap-1.5"
+    >
+      <span
+        className="flex h-11 w-11 items-center justify-center rounded-full transition-colors"
+        style={{
+          background: danger ? 'var(--ember)' : on ? 'transparent' : 'var(--chalk-soft)',
+          boxShadow: lit ? 'none' : '0 0 0 1px var(--hairline)',
+        }}
+      >
+        <svg
+          width="21"
+          height="21"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={danger ? 'var(--void)' : on ? 'var(--chalk-soft)' : 'var(--void)'}
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {children}
+        </svg>
+      </span>
+      <span className="label" style={{ color: 'var(--ash)' }}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export default function Session() {
   const svgRef = useRef<SVGSVGElement>(null);
   const figRef = useRef<SVGGElement>(null);
@@ -118,6 +177,22 @@ export default function Session() {
    * actually stopped.
    */
   const spoken = useRef<{ text: string; atSamples: number }[]>([]);
+  const [micOn, setMicOn] = useState(true);
+  /** The viewfinder is open — the student is lining up a shot, briefly. */
+  const [showing, setShowing] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const camStream = useRef<MediaStream | null>(null);
+  const camVideo = useRef<HTMLVideoElement | null>(null);
+  /**
+   * The last thing the student held up, kept as a still.
+   *
+   * A still, not a stream. Holding a notebook up to a teacher is one act with
+   * one picture in it, and a lesson does not need frames of a desk between
+   * them — so the camera runs only while the viewfinder is open, and what
+   * survives is the single frame the student chose.
+   */
+  const heldFrame = useRef<{ mimeType: string; data: string; at: number } | null>(null);
+  const [shownAt, setShownAt] = useState(0);
   /** True between activityStart and activityEnd. */
   const streaming = useRef(false);
   const commitTimer = useRef(0);
@@ -246,6 +321,29 @@ export default function Session() {
     : presenceState === 'thinking' ? 'thinking…'
     : presenceState === 'listening' ? 'listening — go ahead'
     : 'idle';
+
+  /**
+   * A still from the student's camera, as a JPEG the model can be handed.
+   *
+   * Taken at the moment the teacher asks rather than streamed, because a
+   * lesson does not need 2fps of a desk — it needs the one frame where the
+   * notebook is being held up. 768px wide is enough to read handwriting and
+   * small enough not to cost a noticeable pause.
+   */
+  const grabFrame = useCallback((): { mimeType: string; data: string } | null => {
+    const video = camVideo.current;
+    if (!video || !camStream.current || video.videoWidth === 0) return null;
+    const w = 768;
+    const h = Math.round((video.videoHeight / video.videoWidth) * w) || 576;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, w, h);
+    const url = canvas.toDataURL('image/jpeg', 0.72);
+    return { mimeType: 'image/jpeg', data: url.slice(url.indexOf(',') + 1) };
+  }, []);
 
   const start = useCallback(async () => {
     if (phase !== 'idle') return;
@@ -426,10 +524,12 @@ export default function Session() {
      * Both pieces of evidence — how long they spoke, and what they said —
      * only exist once they stop. So that is when this runs.
      */
-    const settleTurn = () => {
-      // The teacher was not talking, so nothing was interrupted: this is an
-      // ordinary turn and must not be reported to the model as a barge-in.
-      if (!heldRef.current) {
+    const settleTurn = (committed: boolean) => {
+      // Nothing of the teacher's was playing, so nothing was interrupted: an
+      // ordinary turn, and it must not be reported to the model as a barge-in.
+      // The queue is checked as well as the hold, because the hold only arms
+      // while the teacher is audible and the VAD can miss that instant.
+      if (!heldRef.current && io.clock.queued === 0) {
         bargeIn.current = false;
         return;
       }
@@ -438,6 +538,26 @@ export default function Session() {
         Math.max(0, v.lastVoice - v.startedAt),
         lastHeard.current,
       );
+      /**
+       * A nod may only be called a nod on the evidence of the WORDS.
+       *
+       * `committed` means the server was told the student is speaking, and the
+       * server kills the running generation the moment it hears that. Resuming
+       * the queue afterwards plays out a turn that no longer exists, and the
+       * answer to what was actually asked arrives behind all of it — which is
+       * the failure this whole path exists to prevent.
+       *
+       * Measured: the transcript lands in 247-398ms, well inside the wait, so
+       * a real "haan" does arrive as the word "haan" and still carries on. A
+       * committed utterance that only LOOKS short is the other case entirely —
+       * speech broken into pieces by the echo guard — and it is treated as
+       * real, because the cost of being wrong is a sentence and the cost of
+       * the alternative is ignoring the student.
+       */
+      if (committed && verdict.isBackchannel && verdict.via === 'duration') {
+        takeTheTurn(`${verdict.reason}, but committed`);
+        return;
+      }
       // Nothing measurable was said: never throw a turn away on that.
       if (verdict.spurious) carryOn('nothing heard');
       else if (verdict.isBackchannel) carryOn(verdict.reason);
@@ -522,9 +642,37 @@ export default function Session() {
             return;
           }
           // They have already stopped, so it can be settled now.
-          settleTurn();
+          settleTurn(streaming.current);
         },
         toolCall: (call: ToolCall) => {
+          /**
+           * `look` is BLOCKING and answers from the camera, not the board, so
+           * it never reaches the scheduler: there is no chalk to anchor it to
+           * and the teacher has stopped to see the thing.
+           */
+          if (call.name === 'look') {
+            const held = heldFrame.current;
+            push('system', held ? 'looked at what the student showed' : 'look — nothing being shown');
+            session.sendToolResponse(
+              call.callId,
+              call.name,
+              held
+                ? {
+                    ok: true,
+                    note: 'the picture is attached — this is what the student is holding up',
+                    takenSecondsAgo: Math.round((Date.now() - held.at) / 1000),
+                  }
+                : {
+                    ok: false,
+                    error: 'the student is not showing you anything right now',
+                    fix: 'ask them to press Show and hold it up to the camera',
+                  },
+              true,
+              held ? { mimeType: held.mimeType, data: held.data } : undefined,
+            );
+            awaitingResume.current = performance.now();
+            return;
+          }
           // calc is BLOCKING: generation has stopped waiting for it, so it
           // cannot wait on the pen. Everything else is queued for playback.
           if (call.name === 'calc') {
@@ -654,7 +802,7 @@ export default function Session() {
         // The utterance is over, so there is finally something to judge it on.
         // A blip the server was never told about cannot have interrupted
         // anything, so the queued sentence simply carries on.
-        if (committed || bargeIn.current) settleTurn();
+        if (committed || bargeIn.current) settleTurn(committed);
         else if (heldRef.current) carryOn('blip');
         if (committed) {
           streaming.current = false;
@@ -672,8 +820,76 @@ export default function Session() {
     await session.connect();
   }, [push, phase]);
 
+  const closeViewfinder = useCallback(() => {
+    if (camStream.current) {
+      for (const t of camStream.current.getTracks()) t.stop();
+      camStream.current = null;
+    }
+    if (camVideo.current) camVideo.current.srcObject = null;
+    setShowing(false);
+  }, []);
+
+  /** Open the viewfinder. The camera runs only while it is open. */
+  const openViewfinder = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        // Rear camera where there is one: the thing being shown is a notebook
+        // on the desk, not the student's face.
+        video: { width: { ideal: 1280 }, facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+      camStream.current = stream;
+      if (camVideo.current) {
+        camVideo.current.srcObject = stream;
+        await camVideo.current.play().catch(() => {});
+      }
+      setCameraError('');
+      setShowing(true);
+    } catch {
+      setCameraError('camera blocked');
+      setShowing(false);
+    }
+  }, []);
+
+  /**
+   * Hold it up: take the one frame, put the camera away, and tell the teacher
+   * there is something to look at.
+   *
+   * The picture itself can only travel on a tool RESPONSE, so it waits here
+   * until the teacher asks — which it does because this line tells it to. One
+   * image per thing shown, and nothing at all in between.
+   */
+  const showIt = useCallback(() => {
+    const frame = grabFrame();
+    closeViewfinder();
+    if (!frame) {
+      setCameraError('could not take the picture');
+      return;
+    }
+    heldFrame.current = { ...frame, at: Date.now() };
+    setShownAt(Date.now());
+    push('system', 'showed the teacher a picture');
+    sessRef.current?.sendContext(
+      'SYSTEM: the student is holding something up to show you. Call look now to see it, then talk about what is actually in it.',
+    );
+  }, [grabFrame, closeViewfinder, push]);
+
+  const toggleMic = useCallback(() => {
+    setMicOn((on) => {
+      ioRef.current?.muteMic(on);
+      return !on;
+    });
+  }, []);
+
   const stop = useCallback(async () => {
     setPhase('idle');
+    if (camStream.current) {
+      for (const t of camStream.current.getTracks()) t.stop();
+      camStream.current = null;
+    }
+    setShowing(false);
+    heldFrame.current = null;
+    setMicOn(true);
     sessRef.current?.close();
     await ioRef.current?.stop();
     sceneRef.current?.clock.freeze();
@@ -701,8 +917,26 @@ export default function Session() {
           the rail bright and the eye had two places to go; dimming the whole
           room leaves exactly one lit thing on the screen. */}
       <div
-        className="flex h-full"
+        className="flex h-full items-center"
         style={{
+          /**
+           * The height BOTH columns get.
+           *
+           * The board is an SVG that keeps its 3:2 ratio, so on a wide window
+           * it is width-limited and its height lands wherever the ratio puts
+           * it — while the rail, being `h-full`, ran the whole window. Nothing
+           * tied them together and the two boxes disagreed by however much the
+           * ratio happened to leave over.
+           *
+           * So the board's height is worked out here instead of discovered:
+           * the smaller of the room available and what the width allows at
+           * 3:2, with the rail's own width and both gutters taken out first.
+           * Both columns are then given it and centred, and they agree at
+           * every window size — including a tall narrow one, where the board
+           * becomes height-limited and the rail shortens to meet it.
+           */
+          ['--stage-h' as string]:
+            'min(calc(100vh - 3.5rem), calc((100vw - clamp(330px, 30vw, 460px) - 7rem) * 2 / 3))',
           filter: active ? 'none' : 'saturate(0.62) brightness(0.78)',
           transition: 'filter 900ms cubic-bezier(0.2,0.7,0.2,1)',
         }}
@@ -720,7 +954,10 @@ export default function Session() {
           axis. Letting the element carry its own ratio removes the whole class
           of bug, and the element can never disagree with its viewBox because
           it IS its viewBox. */}
-      <section className="flex min-w-0 flex-1 items-center justify-center py-7 pl-8 pr-6">
+      <section
+        className="flex min-w-0 flex-1 items-center justify-center pl-8 pr-6"
+        style={{ height: 'var(--stage-h)' }}
+      >
         <div className="relative flex h-full w-full items-center justify-center">
           {/* Light spilling off the board into the room. The only reason the
               rest of the screen is allowed to be this dark. */}
@@ -772,8 +1009,8 @@ export default function Session() {
           kinematics" was a label for something already obvious from the board,
           and the row is worth more as transcript. */}
       <aside
-        className="rise flex w-[30%] min-w-[330px] max-w-[460px] flex-col py-7 pl-6 pr-8"
-        style={{ animationDelay: '120ms' }}
+        className="rise flex w-[30%] min-w-[330px] max-w-[460px] flex-col pl-6 pr-8"
+        style={{ height: 'var(--stage-h)', animationDelay: '120ms' }}
       >
       <div
         className="flex h-full flex-col overflow-hidden rounded-[3px]"
@@ -789,17 +1026,10 @@ export default function Session() {
           <span className="label" style={{ color: statusTone }}>
             {statusLabel}
           </span>
-          {/* Rarely pressed, so it sits opposite the status rather than taking
-              a row of its own at the bottom — that edge belongs to the
-              teacher now. */}
-          {active && (
-            <button
-              onClick={stop}
-              className="label ml-auto transition-colors hover:text-[color:var(--chalk-soft)]"
-              style={{ color: 'var(--ash)' }}
-            >
-              End
-            </button>
+          {showing && (
+            <span className="label ml-auto" style={{ color: 'var(--ember)' }}>
+              camera on
+            </span>
           )}
         </div>
 
@@ -881,6 +1111,100 @@ export default function Session() {
               gaze={gaze}
             />
           </div>
+        </div>
+
+        {/*
+          The student's own controls — the same three a call has, in the same
+          order, because this IS a call and nobody should have to learn it.
+          They live under the presence, on the student's side of the room; the
+          board belongs to the teacher.
+
+          The video element is always mounted, never conditional: the stream is
+          attached to it the moment permission is granted, and an element that
+          only appears once `cameraOn` flips would not exist yet at that point.
+        */}
+        <div className={active ? 'shrink-0 px-6 pb-5' : 'hidden'}>
+          {/*
+            The viewfinder exists only while a shot is being lined up. The
+            element stays mounted so the stream has something to attach to the
+            instant permission is granted, but the camera itself is started on
+            Show and stopped again on Send or Cancel — one picture per thing
+            held up, and nothing running in between.
+          */}
+          <div
+            className="mb-3 overflow-hidden rounded-lg transition-all"
+            style={{
+              height: showing ? 132 : 0,
+              opacity: showing ? 1 : 0,
+              boxShadow: showing ? '0 0 0 1px var(--hairline)' : 'none',
+            }}
+          >
+            <video ref={camVideo} muted playsInline className="h-full w-full object-cover" />
+          </div>
+
+          {cameraError && (
+            <p className="label mb-2" style={{ color: 'var(--ember)' }}>
+              {cameraError}
+            </p>
+          )}
+
+          {showing ? (
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={showIt}
+                className="label rounded-full px-5 py-2.5 transition-opacity hover:opacity-90"
+                style={{ background: 'var(--ember)', color: 'var(--void)' }}
+              >
+                Show the teacher
+              </button>
+              <button
+                onClick={closeViewfinder}
+                className="label px-3 py-2.5 transition-colors hover:text-[color:var(--chalk-soft)]"
+                style={{ color: 'var(--ash)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-3">
+              <CallButton
+                on={micOn}
+                onClick={toggleMic}
+                label={micOn ? 'mute' : 'unmute'}
+                title={micOn ? 'Mute your microphone' : 'Unmute your microphone'}
+              >
+                {micOn ? (
+                  <>
+                    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M9 6a3 3 0 0 1 6 0v5M9 11v1a3 3 0 0 0 4.8 2.4" />
+                    <path d="M5 11a7 7 0 0 0 10.9 5.8M12 18v3M4 4l16 16" />
+                  </>
+                )}
+              </CallButton>
+              <CallButton
+                on
+                onClick={openViewfinder}
+                label="show"
+                title="Hold your notebook, textbook or anything else up to the camera"
+              >
+                <path d="M3 9.5A1.5 1.5 0 0 1 4.5 8h2L8 6h8l1.5 2h2A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-8Z" />
+                <circle cx="12" cy="13" r="3.2" />
+              </CallButton>
+              <CallButton on={false} danger onClick={stop} label="end" title="End the lesson">
+                <path d="M4.5 13.5c4-4 11-4 15 0l-1.8 1.8a1.4 1.4 0 0 1-1.8.2l-1.7-1.2a1.4 1.4 0 0 1-.6-1.1v-1.4a9 9 0 0 0-5.2 0v1.4a1.4 1.4 0 0 1-.6 1.1l-1.7 1.2a1.4 1.4 0 0 1-1.8-.2L4.5 13.5Z" />
+              </CallButton>
+            </div>
+          )}
+
+          {shownAt > 0 && !showing && (
+            <p className="label mt-2 text-center" style={{ color: 'var(--ash)' }}>
+              shown to the teacher
+            </p>
+          )}
         </div>
       </div>
       </aside>

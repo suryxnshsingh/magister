@@ -144,6 +144,13 @@ export interface VoiceSession {
     name: string,
     response: Record<string, unknown>,
     resume?: boolean,
+    /**
+     * A picture to hand back with the result — what the student is holding up
+     * to the camera. Rides on the response rather than as realtime video,
+     * because a tool response is the channel that demonstrably reaches the
+     * model.
+     */
+    image?: { mimeType: string; data: string },
   ): void;
   /** Inject text without asking for a reply — board summaries, nudges. */
   sendContext(text: string): void;

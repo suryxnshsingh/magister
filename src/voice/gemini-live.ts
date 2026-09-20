@@ -264,6 +264,7 @@ export class GeminiLiveSession implements VoiceSession {
     name: string,
     response: Record<string, unknown>,
     resume = false,
+    image?: { mimeType: string; data: string },
   ) {
     this.session?.sendToolResponse({
       functionResponses: [
@@ -271,6 +272,13 @@ export class GeminiLiveSession implements VoiceSession {
           id: callId,
           name,
           response,
+          // An image comes back as a response PART. This is the channel that
+          // works: frames pushed as realtime video are accepted and then not
+          // seen — the model answers "I cannot see the image" — whereas a
+          // picture attached to a function response is read.
+          ...(image
+            ? { parts: [{ inlineData: { mimeType: image.mimeType, data: image.data } }] }
+            : {}),
           // WHEN_IDLE prompts generation without cutting anything off, which
           // is what a BLOCKING tool needs: it stopped to wait for this.
           // SILENT is right only for fire-and-forget board ops — using it on a

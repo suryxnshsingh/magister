@@ -39,6 +39,13 @@ export const BACKCHANNEL_MAX_MS = 700;
 export interface BackchannelCheck {
   isBackchannel: boolean;
   /**
+   * Which evidence decided it. A verdict from the transcript is worth far more
+   * than one from the clock: "haan" reaching us as the word "haan" is proof,
+   * whereas a short DURATION is equally consistent with a real question whose
+   * audio arrived in pieces.
+   */
+  via: 'transcript' | 'duration' | 'silence';
+  /**
    * The server flagged an interruption but this microphone never heard the
    * student at all. Almost always the server's VAD reacting to room noise or
    * to the teacher's own voice leaking back in without headphones.
@@ -68,7 +75,7 @@ export function classifyInterruption(
   // No local speech at all: this microphone never heard the student, so there
   // is nothing to interrupt for. Ignore it rather than discarding the turn.
   if (durationMs <= 0 && !transcript?.trim()) {
-    return { isBackchannel: false, spurious: true, reason: 'no local speech' };
+    return { isBackchannel: false, spurious: true, via: 'silence', reason: 'no local speech' };
   }
 
   const words = (transcript ?? '')
@@ -80,16 +87,16 @@ export function classifyInterruption(
   // A transcript we actually have beats any duration heuristic.
   if (words.length > 0) {
     if (words.length > 3) {
-      return { isBackchannel: false, spurious: false, reason: `${words.length} words` };
+      return { isBackchannel: false, spurious: false, via: 'transcript', reason: `${words.length} words` };
     }
     const allAck = words.every((w) => TOKENS.has(w));
     return allAck
-      ? { isBackchannel: true, spurious: false, reason: `acknowledgement: "${words.join(' ')}"` }
-      : { isBackchannel: false, spurious: false, reason: `"${words.join(' ')}"` };
+      ? { isBackchannel: true, spurious: false, via: 'transcript', reason: `acknowledgement: "${words.join(' ')}"` }
+      : { isBackchannel: false, spurious: false, via: 'transcript', reason: `"${words.join(' ')}"` };
   }
 
   if (durationMs < BACKCHANNEL_MAX_MS) {
-    return { isBackchannel: true, spurious: false, reason: `${Math.round(durationMs)}ms utterance` };
+    return { isBackchannel: true, spurious: false, via: 'duration', reason: `${Math.round(durationMs)}ms utterance` };
   }
-  return { isBackchannel: false, spurious: false, reason: `${Math.round(durationMs)}ms utterance` };
+  return { isBackchannel: false, spurious: false, via: 'duration', reason: `${Math.round(durationMs)}ms utterance` };
 }

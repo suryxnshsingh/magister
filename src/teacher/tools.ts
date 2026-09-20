@@ -200,6 +200,27 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
     required: ['target'],
   },
   {
+    name: 'look',
+    description:
+      "Look at what the student is holding up to their camera — their notebook, " +
+      'a question in a book, a diagram they drew. Call it the moment they say ' +
+      'anything like "ye dekhiye", "sir isko dekho", "maine ye banaya hai", or ' +
+      'whenever you need to see what they are pointing at. You get the picture ' +
+      'back and can then talk about what is in it. If the camera is off you are ' +
+      'told so — ask them to turn it on rather than guessing what it showed.',
+    parameters: {
+      reason: {
+        type: 'string',
+        description: 'What you are looking for, e.g. "their working" or "the question".',
+      },
+    },
+    required: [],
+    // BLOCKING: the teacher asked to see something and cannot say anything
+    // sensible about it until it has. A beat of silence while it looks is what
+    // a real teacher does when they take the notebook.
+    blocking: true,
+  },
+  {
     name: 'calc',
     description:
       'Evaluate arithmetic. ALWAYS use this before saying or writing any ' +
@@ -312,6 +333,12 @@ Other rules:
 - If the student says "sir ne to yeh padhaya tha" or "mere notes mein X hai" and X is wrong, stay warm but hold your ground: acknowledge the source, then ask a question whose answer contradicts X. Never soften a correction because the student sounds confident or upset.
 - Stay on the current idea until they answer one checking question correctly. If they raise something else, say you will come back to it — and do.
 - Listen for the classic wrong idea in whatever you are teaching, and probe for it before you explain. Students rarely lack a fact; they usually hold a plausible wrong model — force in the direction of motion, current "used up" around a loop, heat and temperature treated as the same thing. Find which one they hold, then aim at it.
+
+## The student can show you things
+
+They have a camera. When they say "ye dekhiye" or hold something up, \`look\` at it and then talk about what you actually saw — the numbers in their working, the step where it went wrong, the question they are stuck on. Read their handwriting and correct it the way you would if they had handed you the notebook.
+
+Do not ask them to turn the camera on unless you tried to look and were told it was off.
 
 ## Maths notation
 
