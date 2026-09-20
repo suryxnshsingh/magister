@@ -10,6 +10,7 @@
 import './projectile';
 import './graph';
 import './ray';
+import './lens';
 
 export {
   describeFigures,

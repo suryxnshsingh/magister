@@ -261,8 +261,10 @@ export function createLens(
     const incident = polylineD([objTip, hit]);
     if (noImage) {
       // Parallel emergent light: no image, so the outgoing ray leaves at the
-      // height it struck, forever.
-      const end = { x: hit.x + dir * 420, y: hit.y };
+      // height it struck and runs to the edge of the column — "forever" is the
+      // point, and stopping short of the boundary says it better than
+      // overshooting it.
+      const end = { x: dir > 0 ? axisR.x - 8 : axisL.x + 8, y: hit.y };
       return { solid: `${incident} ${polylineD([hit, end])}`, dashed: [] };
     }
     const toImage = { x: imgTip.x - hit.x, y: imgTip.y - hit.y };
@@ -274,7 +276,9 @@ export function createLens(
     }
     // Virtual: the outgoing light goes the OTHER way along the same line, and
     // only its back-extension passes through the image.
-    const out = { x: hit.x - (toImage.x / len) * 300, y: hit.y - (toImage.y / len) * 300 };
+    const reachEdge = Math.abs((dir > 0 ? axisR.x - 8 : axisL.x + 8) - hit.x);
+    const run = Math.min(320, Math.max(90, reachEdge));
+    const out = { x: hit.x - (toImage.x / len) * run, y: hit.y - (toImage.y / len) * run };
     return {
       solid: `${incident} ${polylineD([hit, out])}`,
       dashed: dashedD(hit, imgTip),
@@ -295,16 +299,27 @@ export function createLens(
   // ---- the numbers, signed, because the sign is the lesson ----------------
   const fmt = (n: number) => (Number.isFinite(n) ? `${n > 0 ? '+' : ''}${round(n)}` : '∞');
   const round = (n: number) => (Math.abs(n % 1) < 0.05 ? n.toFixed(0) : n.toFixed(1));
-  const below = (a: Pt, b: Pt, dy: number) => ({ x: (a.x + b.x) / 2, y: pole.y + dy });
+  // Each dimension gets its own row under the axis, so u, v and f can span
+  // overlapping stretches of it without landing on each other — and the first
+  // row starts BELOW the element, which reaches a long way down from the axis
+  // and would otherwise be written straight through.
+  const ROW = P({ x: midX, y: midY - EH }).y + 36;
+  const below = (a: Pt, b: Pt, row: number) => ({
+    x: (a.x + b.x) / 2,
+    y: ROW + row * 48,
+  });
 
-  const labU = f.label('label_u', `u = ${fmt(p.u)}`, below(objFoot, pole, 96), 'middle', YELLOW);
+  const labU = f.label('label_u', `u = ${fmt(p.u)}`, below(objFoot, pole, 1), 'middle', YELLOW);
   const labV = noImage
-    ? f.label('label_v', 'v = ∞', below(pole, axisR, 150), 'middle', YELLOW)
-    : f.label('label_v', `v = ${fmt(v)}`, below(pole, imgFoot, 150), 'middle', YELLOW);
+    ? f.label('label_v', 'v = ∞', below(pole, axisR, 2), 'middle', YELLOW)
+    : f.label('label_v', `v = ${fmt(v)}`, below(pole, imgFoot, 2), 'middle', YELLOW);
+  // Below the axis, on its own row. Above it is where the object stands, and
+  // for a mirror the focus is on the object's side — so an f label placed over
+  // the axis lands on the object arrow every time.
   const labFocal = f.label(
     'label_focal',
     `f = ${fmt(p.f)}`,
-    { x: focusNear.x, y: pole.y - 78 },
+    below(focusNear, pole, 0),
     'middle',
     YELLOW,
   );
@@ -337,9 +352,16 @@ export function createLens(
     createDraw(`${id}.element`, element, t + 380, 620),
     ...(backing ? [createDraw(`${id}.backing`, backing, t + 900, 420)] : []),
     createFadeIn(`${id}.pole`, [poleDot], t + 980, 200),
-    createFadeIn(`${id}.focus`, [focus, focus2], t + 1080, 240),
-    createFadeIn(`${id}.centre`, [centre, centre2], t + 1160, 240),
-    createFadeIn(`${id}.label_f`, [labF, labF2, labC, labC2], t + 1240, 260),
+    // One animation per part — the board reads the part a step reveals from
+    // the animation's name, so a shared fade hides everything but the first.
+    createFadeIn(`${id}.focus`, [focus], t + 1080, 240),
+    createFadeIn(`${id}.focus2`, [focus2], t + 1080, 240),
+    createFadeIn(`${id}.centre`, [centre], t + 1160, 240),
+    createFadeIn(`${id}.centre2`, [centre2], t + 1160, 240),
+    createFadeIn(`${id}.label_f`, [labF], t + 1240, 260),
+    createFadeIn(`${id}.label_f2`, [labF2], t + 1240, 260),
+    createFadeIn(`${id}.label_c`, [labC], t + 1240, 260),
+    createFadeIn(`${id}.label_c2`, [labC2], t + 1240, 260),
     createFadeIn(`${id}.label_kind`, [labKind], t + 1320, 260),
   ]);
 
