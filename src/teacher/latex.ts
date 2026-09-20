@@ -107,6 +107,10 @@ function replaceCalls(
   }
 }
 
+/** The board's two non-chalk inks, as MathJax wants them. */
+const YELLOW = '#f0d264';
+const DIM_INK = '#cfc9b6';
+
 /** Plain notation -> LaTeX. Order matters: longest names first. */
 function plainToLatex(src: string): string {
   let s = src;
@@ -116,6 +120,27 @@ function plainToLatex(src: string): string {
     s = replaceCalls(s, f, ([a]) => `\\${f}{${plainToLatex(a ?? '')}}`);
   }
   s = replaceCalls(s, 'sqrt', ([a]) => `\\sqrt{${plainToLatex(a ?? '')}}`);
+
+  // Vectors and derivatives, in the notation this subject is actually written
+  // in. `physics` renders all of these as ordinary glyph paths, so they write
+  // stroke by stroke like everything else.
+  s = replaceCalls(s, 'vec', ([a]) => `\\va{${plainToLatex(a ?? '')}}`);
+  s = replaceCalls(s, 'hat', ([a]) => `\\vu{${plainToLatex(a ?? '')}}`);
+  s = replaceCalls(
+    s,
+    'pdv',
+    (a) => `\\pdv{${plainToLatex(a[0] ?? '')}}{${plainToLatex(a[1] ?? '')}}`,
+  );
+  s = replaceCalls(
+    s,
+    'dv',
+    (a) => `\\dv{${plainToLatex(a[0] ?? '')}}{${plainToLatex(a[1] ?? '')}}`,
+  );
+
+  // One quantity, one colour, across the equation and the figure beside it.
+  // The names match `draw`'s colour words so there is one vocabulary to learn.
+  s = replaceCalls(s, 'accent', ([a]) => `\\textcolor{${YELLOW}}{${plainToLatex(a ?? '')}}`);
+  s = replaceCalls(s, 'dim', ([a]) => `\\textcolor{${DIM_INK}}{${plainToLatex(a ?? '')}}`);
   s = replaceCalls(
     s,
     'frac',

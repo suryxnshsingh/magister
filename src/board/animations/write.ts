@@ -88,10 +88,14 @@ export function createWrite(
       const from = Math.max(0, acc - share * OVERLAP);
       acc += share;
       const plan: GlyphPlan = { el, len: lens[i], from, to: acc };
-      el.style.stroke = color;
+      // A glyph that came out of MathJax already coloured keeps its colour:
+      // these are inline styles and they beat the inherited attribute, so
+      // without asking, every accented term would be written in plain chalk.
+      const ink = el.getAttribute('data-ink') || color;
+      el.style.stroke = ink;
       el.style.strokeWidth = String(strokeWidth);
       el.style.strokeLinecap = 'round';
-      el.style.fill = color;
+      el.style.fill = ink;
       el.style.fillOpacity = '0';
       el.style.strokeDasharray = `${lens[i]}`;
       el.style.strokeDashoffset = `${lens[i]}`;

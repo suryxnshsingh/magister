@@ -18,6 +18,12 @@ import { TeX } from '@mathjax/src/mjs/input/tex.js';
 import { SVG } from '@mathjax/src/mjs/output/svg.js';
 import { liteAdaptor } from '@mathjax/src/mjs/adaptors/liteAdaptor.js';
 import { RegisterHTMLHandler } from '@mathjax/src/mjs/handlers/html.js';
+// Packages register as an import side effect and must be present at
+// construction: `\require{...}` needs an async loader, which a liteAdaptor
+// built from direct mjs imports does not have — it throws "an asynchronous
+// action is required" instead of loading anything.
+import '@mathjax/src/mjs/input/tex/color/ColorConfiguration.js';
+import '@mathjax/src/mjs/input/tex/physics/PhysicsConfiguration.js';
 
 import { PX_PER_UNIT } from '../units';
 
@@ -49,7 +55,13 @@ function ensureDoc() {
   const adaptor = liteAdaptor();
   RegisterHTMLHandler(adaptor);
   const doc = mathjax.document('', {
-    InputJax: new TeX({ packages: ['base'] }),
+    // `physics` is the notation this subject is written in — a vector with an
+    // arrow over it, a derivative that is not a fraction of two letters — and
+    // `color` is what lets one quantity keep one colour across an equation and
+    // the diagram beside it. Both cost nothing to render: every macro either
+    // resolves to ordinary glyph paths or to a rule, which rectsToPaths
+    // already handles.
+    InputJax: new TeX({ packages: ['base', 'color', 'physics'] }),
     // The one setting this module exists to enforce.
     OutputJax: new SVG({ fontCache: 'none' }),
   });
@@ -150,6 +162,7 @@ export function typeset(tex: string, em: number = DEFAULT_EM): Typeset {
     // they still animate, so keep everything that carries a 'd'.
     (p.getAttribute('d') ?? '').length > 0,
   ) as SVGPathElement[];
+  stampInk(glyphs);
 
   const root = svg.querySelector('g[data-mml-node="math"]');
   const parts = root
@@ -159,6 +172,29 @@ export function typeset(tex: string, em: number = DEFAULT_EM): Typeset {
     : [];
 
   return { svg, glyphs, parts, width, height, ascent };
+}
+
+/**
+ * Record the colour each glyph inherits, on the glyph itself.
+ *
+ * MathJax puts a colour on an ANCESTOR — `\textcolor` emits a wrapping
+ * `<g fill="..." stroke="...">` — and the write animation sets fill and stroke
+ * inline on the glyph, which beats an inherited attribute. So a coloured term
+ * would be written in chalk white and the colour silently lost. Reading it
+ * here, before anything is overridden, is what lets the animation put it back.
+ */
+function stampInk(glyphs: SVGPathElement[]) {
+  for (const glyph of glyphs) {
+    let node: Element | null = glyph;
+    while (node && node.nodeName.toLowerCase() !== 'svg') {
+      const fill = node.getAttribute('fill');
+      if (fill && fill !== 'none' && fill !== 'currentColor') {
+        glyph.setAttribute('data-ink', fill);
+        break;
+      }
+      node = node.parentElement;
+    }
+  }
 }
 
 /**

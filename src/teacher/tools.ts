@@ -32,7 +32,12 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'Put maths inside $...$ and write it in PLAIN notation with NO backslashes: ' +
       'greek letters by name (theta, alpha), functions as cos(theta) or sin(2 theta), ' +
       'fractions as frac(numerator, denominator), powers as u^2, subscripts as u_x, ' +
-      'multiplication as *. Example: "$u_x = u cos(theta) = 17.3 m/s$". ' +
+      'multiplication as *. Vectors as vec(F), unit vectors as hat(n), ' +
+      'derivatives as dv(x,t) and pdv(u,x) — use them, a vector should look ' +
+      'like a vector. Wrap ONE quantity in accent(...) to give it the accent ' +
+      'colour, and use colour=accent on that same quantity when you draw it, so ' +
+      'the v in the equation and the v on the diagram are visibly one thing. ' +
+      'Example: "$u_x = u cos(theta) = 17.3 m/s$". ' +
       'Example: "$R = frac(u^2 sin(2 theta), g)$". ' +
       'Give each line a short meaningful id you can refer to later, like "ux" or "range".',
     parameters: {
