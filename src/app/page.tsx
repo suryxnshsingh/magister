@@ -59,12 +59,6 @@ const COMMIT_SPEECH_MS = 260;
 /** Mic audio held back so the start of an utterance is never clipped. */
 const PREROLL_MS = 320;
 /**
- * The same window while the teacher is talking. Shorter, because every frame
- * of it also carries the teacher's own voice — but never zero, or a barge-in
- * loses the word it opened with.
- */
-const PREROLL_ECHO_MS = 180;
-/**
  * How much louder the student must be than the teacher to count as speech.
  *
  * Browser echo cancellation is not enough on open speakers: the teacher's own
@@ -736,19 +730,22 @@ export default function Session() {
       /**
        * Hold recent audio so a committed utterance can replay its own opening.
        *
-       * While the teacher is audible most of this is echo, so the window is
-       * kept SHORT rather than emptied. Emptying it was worse than the echo it
-       * avoided: a barge-in is by definition speech over the teacher, so the
-       * buffer was always empty exactly when it mattered, and the utterance
-       * committed 260ms late — mid-word. That is how "ye theek banaya hai
-       * mera?" reaches the model as "ki sahi banaya hai mera", and a
-       * decapitated sentence is also how it ends up guessing which language it
-       * is being spoken to in.
+       * Anything captured while the teacher was audible is echo, not speech,
+       * and must never be replayed into the model. This was once relaxed to a
+       * short window on the theory that a barge-in loses its first word
+       * otherwise — and it cost far more than it bought. Prepending even a
+       * fraction of a second of the teacher's own voice to the student's turn
+       * made the recogniser return nonsense: "ray optics" came back as
+       * "leucifix", "noticias", "game of fix", and the model, reasonably,
+       * could not answer any of it.
+       *
+       * A clipped opening is a small problem. Feeding the model a mixture of
+       * two voices and calling it the student is a total one.
        */
+      if (echoRef.current > 0.02) preroll.current = [];
       if (!streaming.current) {
         preroll.current.push(pcm);
-        const window = echoRef.current > 0.02 ? PREROLL_ECHO_MS : PREROLL_MS;
-        const maxChunks = Math.ceil((window / 1000) * 16000 / 128);
+        const maxChunks = Math.ceil((PREROLL_MS / 1000) * 16000 / 128);
         while (preroll.current.length > maxChunks) preroll.current.shift();
       }
 
@@ -794,16 +791,6 @@ export default function Session() {
         v.speaking = false;
         window.clearTimeout(commitTimer.current);
         const committed = streaming.current;
-        // Settle BEFORE handing the turn over. `sendClientContent` is ordered
-        // only against other `sendClientContent`, not against realtime input,
-        // so a correction sent after `activityEnd` races the student's own
-        // turn and may be read after the reply it was meant to shape.
-        //
-        // The utterance is over, so there is finally something to judge it on.
-        // A blip the server was never told about cannot have interrupted
-        // anything, so the queued sentence simply carries on.
-        if (committed || bargeIn.current) settleTurn(committed);
-        else if (heldRef.current) carryOn('blip');
         if (committed) {
           streaming.current = false;
           session.activityEnd();
@@ -813,6 +800,20 @@ export default function Session() {
           // Never committed — a blip the server was never told about.
           push('system', 'blip ignored — teacher not interrupted');
         }
+        /**
+         * Settled AFTER the turn is handed over, never during it.
+         *
+         * Injecting context while the student's audio is still streaming was
+         * measured to produce garbage — in one probe the model spoke its own
+         * markup aloud. This order is the one that was measured clean, and
+         * reasoning about ordering guarantees does not outrank that.
+         *
+         * The utterance is over, so there is finally something to judge it on.
+         * A blip the server was never told about cannot have interrupted
+         * anything, so the queued sentence simply carries on.
+         */
+        if (committed || bargeIn.current) settleTurn(committed);
+        else if (heldRef.current) carryOn('blip');
       }
       if (streaming.current) session.sendAudio(pcm);
     };
