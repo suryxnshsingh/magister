@@ -31,6 +31,10 @@ export function startEarlyMs(name: string, args: Record<string, unknown>): numbe
       const est = Math.min(WRITE_MAX, Math.max(WRITE_MIN, content.length * MS_PER_CHAR));
       return est * OVERLAP;
     }
+    case 'draw':
+      // One shape is a quick gesture, not a construction — it should land on
+      // the phrase that names it rather than ahead of it.
+      return 500;
     case 'scene':
       // A construction takes a while to draw and the teacher talks over it.
       return 2200;

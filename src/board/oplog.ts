@@ -97,12 +97,30 @@ export interface StepOp extends Common {
   step: string;
 }
 
+/**
+ * A freehand primitive. One shape per op, each becoming an anchor for the next,
+ * so the model names things rather than computing a layout.
+ */
+export interface DrawOp extends Common {
+  kind: 'draw';
+  id: string;
+  shape: string;
+  /** Anchor: an id, "id.part", or normalised "x,y" in the figure column. */
+  from: string;
+  to?: string;
+  /** Second arm, for an angle mark. */
+  to2?: string;
+  text?: string;
+  colour?: 'chalk' | 'dim' | 'accent';
+}
+
 export interface EraseOp extends Common {
   kind: 'erase';
   target: string;
 }
 
 export type Op =
+  | DrawOp
   | WriteOp
   | RewriteOp
   | ResumeOp

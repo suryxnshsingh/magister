@@ -11,6 +11,7 @@
  * earlier. That registry is also what the board summary is derived from when
  * the model needs reminding what it has already put on the board.
  */
+import { createDraw, createFadeIn } from './animations/draw';
 import { createWrite, type WriteAnimation } from './animations/write';
 import { bboxIn, createMark, unionBox, type BBox } from './annotate/marks';
 import { interruptAt, resumeAt, SceneClock, type Animation } from './clock';
@@ -22,7 +23,8 @@ import { type Template } from './templates/projectile';
 import { getFigure, parseParams } from './templates';
 // Importing these registers them; without it the catalogue is empty.
 import { normaliseContent } from '@/teacher/latex';
-import { BOTTOM, DERIVATION, toPx, type Pt } from './units';
+import { BOTTOM, DERIVATION, FIGURE, toPx, type Pt } from './units';
+import { buildShape, type Shape } from './draw-shapes';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -61,6 +63,8 @@ export class Scene {
   readonly clock = new SceneClock();
   readonly objects = new Map<string, BoardObject>();
   readonly templates = new Map<string, Template>();
+  /** Freehand primitives, addressable by bare id like everything else. */
+  readonly drawings = new Map<string, SVGGElement>();
   pen: PenTrack = new PenTrack([]);
 
   constructor(
@@ -143,6 +147,10 @@ export class Scene {
           }),
         );
         break;
+      case 'draw': {
+        for (const a of this.addDrawing(op, now)) this.clock.add(a);
+        break;
+      }
       case 'scene': {
         const spec = getFigure(op.name);
         if (!spec) break;
@@ -163,6 +171,38 @@ export class Scene {
     this.clock.prime();
     this.refreshPen();
     this.clock.seek(now);
+  }
+
+  /**
+   * Turn a `draw` op into a hidden shape plus the animation that reveals it.
+   *
+   * Resolution happens HERE, at fire time, never at enqueue. A primitive
+   * anchored to another primitive would otherwise be resolved before the thing
+   * it references exists, and silently dropped - exactly the bug `mark` had.
+   */
+  private addDrawing(op: Extract<Op, { kind: 'draw' }>, now: number): Animation[] {
+    const from = this.anchorOf(op.from);
+    if (!from) return [];
+    const to = op.to ? this.anchorOf(op.to) : null;
+    const to2 = op.to2 ? this.anchorOf(op.to2) : null;
+
+    const built = buildShape(op.id, {
+      shape: op.shape as Shape,
+      from: from.pt,
+      to: to?.pt ?? null,
+      to2: to2?.pt ?? null,
+      text: op.text,
+      colour: op.colour,
+    });
+    this.layers.figures.appendChild(built.group);
+    this.drawings.set(op.id, built.group);
+
+    const out: Animation[] = [];
+    if (built.paths.length) out.push(createDraw(op.id, built.paths, now, 520));
+    if (built.fades.length) {
+      out.push(createFadeIn(`${op.id}:t`, built.fades, now + (built.paths.length ? 320 : 0), 260));
+    }
+    return out;
   }
 
   /**
@@ -210,7 +250,39 @@ export class Scene {
    * A part that cannot be found falls back to the whole object: a slightly
    * generous circle beats a teacher who points at nothing.
    */
+  /**
+   * Resolve a `draw` anchor to a point in root pixel space.
+   *
+   * One grammar, extending the one `point`/`mark` already use: an id, an
+   * "id.part", or - only as the fallback when nothing named exists yet -
+   * normalised "x,y" inside the figure column, origin bottom-left, y up.
+   * Offering three interchangeable address forms would mean three resolution
+   * paths to debug and a model that picks between them at random.
+   */
+  anchorOf(ref: string): { pt: Pt; clamped: boolean } | null {
+    const m = /^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/.exec(ref ?? '');
+    if (m) {
+      const rawU = Number(m[1]);
+      const rawV = Number(m[2]);
+      const u = Math.max(0, Math.min(1, rawU));
+      const v = Math.max(0, Math.min(1, rawV));
+      const pt = toPx({
+        x: FIGURE.left + u * (FIGURE.right - FIGURE.left),
+        y: FIGURE.bottom + v * (FIGURE.top - FIGURE.bottom),
+      });
+      return { pt, clamped: u !== rawU || v !== rawV };
+    }
+    const b = this.boxOf(ref);
+    if (!b) return null;
+    return { pt: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, clamped: false };
+  }
+
   boxOf(target: string): BBox | null {
+    // A freehand primitive is addressable by its bare id, like everything else
+    // the teacher puts on the board.
+    const drawn = this.drawings.get(target);
+    if (drawn) return bboxIn(drawn, this.root);
+
     // A figure part — "fig.apex" — is addressed with a dot, so the teacher can
     // point into a construction rather than only at it.
     if (target.includes('.')) {
@@ -239,6 +311,8 @@ export class Scene {
     this.cursorY = DERIVATION.top;
     this.liveWrites.clear();
     this.liveTaps = [];
+    this.drawings.clear();
+    this.layers.figures.replaceChildren();
     this.layers.ink.replaceChildren();
     this.layers.marks.replaceChildren();
 
@@ -282,6 +356,12 @@ export class Scene {
               return b ? { x: b.x + b.w / 2, y: b.y + b.h + 16 } : null;
             }),
           );
+          break;
+        }
+        case 'draw': {
+          // Same builder as the live path; a replayed sketch is the same
+          // sketch, resolved against whatever is already on the board at op.t.
+          for (const a of this.addDrawing(op, op.t)) this.clock.add(a);
           break;
         }
         case 'scene': {

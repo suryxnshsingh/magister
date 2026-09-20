@@ -16,6 +16,7 @@
  * keeps talking while the chalk moves.
  */
 import type { ToolDeclaration } from '@/voice/session';
+import { SHAPES } from '@/board/draw-shapes';
 import { describeFigures, figureNames } from '@/board/templates';
 // The catalogue below is generated from the figure registry, so the model is
 // never told about a figure that does not exist.
@@ -69,6 +70,58 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       style: { type: 'string', description: 'circle | underline | strike | box' },
     },
     required: ['target', 'style'],
+  },
+  {
+    name: 'draw',
+    description:
+      'Draw ONE shape on the right-hand side of the board. Call it again for ' +
+      'the next shape — a diagram is built up piece by piece as you describe ' +
+      'it, which is how a teacher actually draws. Every shape you draw gets an ' +
+      'id, and you anchor later shapes to earlier ones by that id instead of ' +
+      'working out positions. Use this for anything there is no prepared ' +
+      'figure for: free-body diagrams, circuits, inclines, pulleys, lenses, ' +
+      'waves, fields, collisions, anything you can sketch. If a prepared ' +
+      'figure fits (see scene), prefer it — it knows its own physics. Never ' +
+      'announce that you are drawing; just keep talking.',
+    parameters: {
+      id: {
+        type: 'string',
+        description: 'Short semantic name, e.g. "block", "N", "theta".',
+      },
+      shape: {
+        type: 'string',
+        description: `One of: ${SHAPES.join(', ')}.`,
+      },
+      from: {
+        type: 'string',
+        description:
+          'Where it starts. Either the id of something already drawn, or "x,y" ' +
+          'as two numbers from 0 to 1 inside the drawing area — 0,0 is the ' +
+          'bottom-left corner and 1,1 the top-right. Use "x,y" for the first ' +
+          'shape and ids after that.',
+      },
+      to: {
+        type: 'string',
+        description:
+          'Where it ends, same format as from. For a circle this is a point on ' +
+          'its rim. For a dot or label, leave it out.',
+      },
+      to2: {
+        type: 'string',
+        description: 'Only for shape "angle": the second arm of the angle.',
+      },
+      text: {
+        type: 'string',
+        description: 'The words, for shape "label", or the angle name for "angle".',
+      },
+      colour: {
+        type: 'string',
+        description:
+          'chalk (default), dim for construction lines, accent to make one ' +
+          'thing stand out.',
+      },
+    },
+    required: ['id', 'shape', 'from'],
   },
   {
     name: 'scene',
@@ -151,6 +204,16 @@ While saying exactly that you would silently write the current relation, underli
 - Point or mark at least once for every two things you write. A teacher who writes but never points is a narrator.
 - Refer back to what is already on the board by its id, constantly.
 - Give every line a short semantic id you will remember, drawn from the physics: "vi", "emf", "focal", "Ktotal".
+
+## You can draw anything
+
+Physics is not equations with occasional pictures. If the thing you are explaining has a picture — and it almost always does — draw it.
+
+You are never stuck for a diagram. If a prepared figure fits, use \`scene\`; it knows its own physics. For everything else use \`draw\`, one shape at a time, building the picture up as you talk: a block, then the forces on it; a wire, then the cell, then the resistor; a surface, then the ray coming in. Anchor each new shape to something already drawn by its id, so you never have to think about positions.
+
+Build a diagram up piece by piece rather than describing it and drawing it at the end. A student watching a free-body diagram appear force by force is learning where the forces come from; the same diagram arriving complete is just a picture.
+
+Never say you cannot draw something, and never apologise for the board.
 
 ## Answer the whole question, in one go
 

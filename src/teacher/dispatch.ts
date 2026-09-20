@@ -14,6 +14,7 @@
 import { measure } from '@/board/math/mathjax';
 import type { MarkStyle, Op } from '@/board/oplog';
 import type { Scene } from '@/board/scene';
+import { SHAPES } from '@/board/draw-shapes';
 import { figureNames, getFigure } from '@/board/templates';
 import type { ToolCall } from '@/voice/session';
 
@@ -111,6 +112,66 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
         resume: false,
         note: `mark ${style} ${target}`,
         response: { ok: true, target, style, ...(style !== wanted ? { note: `"${wanted}" is not a style; used circle` } : {}) },
+      };
+    }
+
+    case 'draw': {
+      const id = str(a.id) || `s${scene.drawings.size + 1}`;
+      const shape = str(a.shape).toLowerCase();
+      if (!(SHAPES as string[]).includes(shape)) {
+        return {
+          op: null,
+          resume: false,
+          note: `draw -> unknown shape "${shape}"`,
+          response: { ok: false, error: `"${shape}" is not a shape`, shapes: SHAPES },
+        };
+      }
+      const from = str(a.from);
+      // Resolution proper happens at fire time, but an anchor that names
+      // something nonexistent has to be reported NOW, while the model can still
+      // recover. Answering ok and drawing nothing is how a teacher ends up
+      // describing a diagram that is not there.
+      const known = (ref: string) =>
+        !ref || /^\s*-?[\d.]+\s*,\s*-?[\d.]+\s*$/.test(ref) || scene.anchorOf(ref) !== null;
+      const bad = [from, str(a.to), str(a.to2)].filter((r) => r && !known(r));
+      if (!known(from)) {
+        return {
+          op: null,
+          resume: false,
+          note: `draw -> unknown anchor "${from}"`,
+          response: {
+            ok: false,
+            error: `nothing on the board called "${from}" — nothing was drawn`,
+            onBoard: [...scene.drawings.keys(), ...scene.objects.keys()],
+            hint: 'use "x,y" from 0 to 1 for the first shape of a diagram',
+          },
+        };
+      }
+      const a0 = scene.anchorOf(from);
+      return {
+        op: {
+          kind: 'draw',
+          t: now,
+          id,
+          shape,
+          from,
+          to: str(a.to) || undefined,
+          to2: str(a.to2) || undefined,
+          text: str(a.text) || undefined,
+          colour: (['chalk', 'dim', 'accent'] as string[]).includes(str(a.colour))
+            ? (str(a.colour) as 'chalk' | 'dim' | 'accent')
+            : undefined,
+        },
+        resume: false,
+        note: `draw ${shape} ${id}`,
+        response: {
+          ok: true,
+          id,
+          // Never clamp silently: the chalk went somewhere other than asked.
+          ...(a0?.clamped ? { moved: 'that was outside the drawing area, so it was pulled inside' } : {}),
+          ...(bad.length ? { ignored: `unknown anchor(s): ${bad.join(', ')}` } : {}),
+          anchor: `you can attach the next shape to "${id}"`,
+        },
       };
     }
 
