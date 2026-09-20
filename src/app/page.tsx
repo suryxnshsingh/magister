@@ -26,6 +26,8 @@ import type { SessionState, ToolCall, VoiceSession } from '@/voice/session';
 import { classifyInterruption } from '@/teacher/backchannel';
 import { startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
+import { Camera, Mic, MicOff, PhoneOff, Video, VideoOff, X } from 'lucide-react';
+
 import Presence from '@/ui/Presence';
 import type { PresenceState } from '@/ui/presence-types';
 import MathText from '@/ui/MathText';
@@ -87,58 +89,53 @@ interface Line {
 /**
  * One round control, the shape every call has.
  *
- * Off is the loud state, not on: a muted microphone is the thing you need to
- * see at a glance, so it fills instead of outlining. The label sits under the
- * icon rather than in a tooltip, because a student who cannot find the mute
- * button will simply keep talking into a dead mic.
+ * Icon only. A call's controls are the most over-learned three buttons on a
+ * screen and a word under each one is noise — the state carries the meaning
+ * instead: a live control is an outline, a switched-off one fills in, so a
+ * muted microphone is the thing that catches the eye.
+ *
+ * Deliberately NOT `.group`, which globals.css gives a translateY on hover.
+ * That lift belongs to the one button on the idle screen; a control bar that
+ * shifts under the cursor reads as unsteady. Hover moves nothing here and
+ * only warms the colour.
  */
 function CallButton({
   on,
   danger,
   onClick,
   label,
-  title,
   children,
 }: {
   on: boolean;
   danger?: boolean;
   onClick: () => void;
   label: string;
-  title: string;
   children: React.ReactNode;
 }) {
-  const lit = danger || !on;
+  const [hover, setHover] = useState(false);
+  const background = danger
+    ? 'var(--ember)'
+    : on
+      ? hover
+        ? 'color-mix(in srgb, var(--chalk-soft) 12%, transparent)'
+        : 'transparent'
+      : 'var(--chalk-soft)';
   return (
     <button
       onClick={onClick}
-      title={title}
-      aria-label={title}
+      onPointerEnter={() => setHover(true)}
+      onPointerLeave={() => setHover(false)}
+      aria-label={label}
       aria-pressed={danger ? undefined : on}
-      className="group flex flex-col items-center gap-1.5"
+      className="flex h-11 w-11 items-center justify-center rounded-full transition-colors"
+      style={{
+        background,
+        boxShadow: danger || !on ? 'none' : '0 0 0 1px var(--hairline)',
+        opacity: danger && hover ? 0.88 : 1,
+        color: danger ? 'var(--void)' : on ? 'var(--chalk-soft)' : 'var(--void)',
+      }}
     >
-      <span
-        className="flex h-11 w-11 items-center justify-center rounded-full transition-colors"
-        style={{
-          background: danger ? 'var(--ember)' : on ? 'transparent' : 'var(--chalk-soft)',
-          boxShadow: lit ? 'none' : '0 0 0 1px var(--hairline)',
-        }}
-      >
-        <svg
-          width="21"
-          height="21"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={danger ? 'var(--void)' : on ? 'var(--chalk-soft)' : 'var(--void)'}
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          {children}
-        </svg>
-      </span>
-      <span className="label" style={{ color: 'var(--ash)' }}>
-        {label}
-      </span>
+      {children}
     </button>
   );
 }
@@ -186,7 +183,6 @@ export default function Session() {
    * survives is the single frame the student chose.
    */
   const heldFrame = useRef<{ mimeType: string; data: string; at: number } | null>(null);
-  const [shownAt, setShownAt] = useState(0);
   /** True between activityStart and activityEnd. */
   const streaming = useRef(false);
   const commitTimer = useRef(0);
@@ -868,7 +864,6 @@ export default function Session() {
       return;
     }
     heldFrame.current = { ...frame, at: Date.now() };
-    setShownAt(Date.now());
     push('system', 'showed the teacher a picture');
     sessRef.current?.sendContext(
       'SYSTEM: the student is holding something up to show you. Call look now to see it, then talk about what is actually in it.',
@@ -1001,6 +996,56 @@ export default function Session() {
             <g ref={penRef} />
           </svg>
 
+          {/*
+            The student's camera, in the board's corner — where a video call
+            puts the other person.
+
+            Pinned to the board's REAL corner, not the section's. The board is
+            always exactly --stage-h tall and 3:2, centred, so its right edge
+            sits half the leftover width in from the section's; the offsets
+            below are that arithmetic, which lets the SVG keep sizing itself
+            (wrapping it would change what its max-width/max-height mean).
+
+            Mounted always, shown only while a shot is being lined up: the
+            stream attaches the instant permission is granted, and an element
+            that only appeared once `showing` flipped would not exist yet.
+          */}
+          <div
+            className="absolute z-10 overflow-hidden rounded-lg transition-opacity duration-200"
+            style={{
+              right: 'calc((100% - var(--stage-h) * 1.5) / 2 + 18px)',
+              bottom: '18px',
+              width: 'calc(var(--stage-h) * 1.5 * 0.26)',
+              aspectRatio: '4 / 3',
+              opacity: showing ? 1 : 0,
+              pointerEvents: showing ? 'auto' : 'none',
+              background: 'var(--void)',
+              boxShadow: '0 0 0 1px var(--hairline), 0 18px 40px -12px rgb(0 0 0 / 0.85)',
+            }}
+          >
+            <video ref={camVideo} muted playsInline className="h-full w-full object-cover" />
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2.5 pb-2.5 pt-8"
+              style={{ background: 'linear-gradient(to top, rgb(0 0 0 / 0.55), transparent)' }}
+            >
+              <button
+                onClick={showIt}
+                aria-label="Show this to the teacher"
+                className="flex h-10 w-10 items-center justify-center rounded-full transition-opacity hover:opacity-85"
+                style={{ background: 'var(--ember)', color: 'var(--void)' }}
+              >
+                <Camera size={18} strokeWidth={1.9} />
+              </button>
+              <button
+                onClick={closeViewfinder}
+                aria-label="Cancel"
+                className="flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-[color:rgb(255_255_255/0.16)]"
+                style={{ background: 'rgb(255 255 255 / 0.1)', color: 'var(--chalk-soft)' }}
+              >
+                <X size={16} strokeWidth={1.9} />
+              </button>
+            </div>
+          </div>
+
         </div>
       </section>
 
@@ -1124,88 +1169,33 @@ export default function Session() {
           attached to it the moment permission is granted, and an element that
           only appears once `cameraOn` flips would not exist yet at that point.
         */}
+        {/*
+          The student's own controls — the same three a call has, in the same
+          order, because this IS a call and nobody should have to learn it.
+          They live under the presence, on the student's side of the room; the
+          board belongs to the teacher.
+        */}
         <div className={active ? 'shrink-0 px-6 pb-5' : 'hidden'}>
-          {/*
-            The viewfinder exists only while a shot is being lined up. The
-            element stays mounted so the stream has something to attach to the
-            instant permission is granted, but the camera itself is started on
-            Show and stopped again on Send or Cancel — one picture per thing
-            held up, and nothing running in between.
-          */}
-          <div
-            className="mb-3 overflow-hidden rounded-lg transition-all"
-            style={{
-              height: showing ? 132 : 0,
-              opacity: showing ? 1 : 0,
-              boxShadow: showing ? '0 0 0 1px var(--hairline)' : 'none',
-            }}
-          >
-            <video ref={camVideo} muted playsInline className="h-full w-full object-cover" />
-          </div>
-
           {cameraError && (
-            <p className="label mb-2" style={{ color: 'var(--ember)' }}>
+            <p className="label mb-3 text-center" style={{ color: 'var(--ember)' }}>
               {cameraError}
             </p>
           )}
-
-          {showing ? (
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={showIt}
-                className="label rounded-full px-5 py-2.5 transition-opacity hover:opacity-90"
-                style={{ background: 'var(--ember)', color: 'var(--void)' }}
-              >
-                Show the teacher
-              </button>
-              <button
-                onClick={closeViewfinder}
-                className="label px-3 py-2.5 transition-colors hover:text-[color:var(--chalk-soft)]"
-                style={{ color: 'var(--ash)' }}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center gap-3">
-              <CallButton
-                on={micOn}
-                onClick={toggleMic}
-                label={micOn ? 'mute' : 'unmute'}
-                title={micOn ? 'Mute your microphone' : 'Unmute your microphone'}
-              >
-                {micOn ? (
-                  <>
-                    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-                  </>
-                ) : (
-                  <>
-                    <path d="M9 6a3 3 0 0 1 6 0v5M9 11v1a3 3 0 0 0 4.8 2.4" />
-                    <path d="M5 11a7 7 0 0 0 10.9 5.8M12 18v3M4 4l16 16" />
-                  </>
-                )}
-              </CallButton>
-              <CallButton
-                on
-                onClick={openViewfinder}
-                label="show"
-                title="Hold your notebook, textbook or anything else up to the camera"
-              >
-                <path d="M3 9.5A1.5 1.5 0 0 1 4.5 8h2L8 6h8l1.5 2h2A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-8Z" />
-                <circle cx="12" cy="13" r="3.2" />
-              </CallButton>
-              <CallButton on={false} danger onClick={stop} label="end" title="End the lesson">
-                <path d="M4.5 13.5c4-4 11-4 15 0l-1.8 1.8a1.4 1.4 0 0 1-1.8.2l-1.7-1.2a1.4 1.4 0 0 1-.6-1.1v-1.4a9 9 0 0 0-5.2 0v1.4a1.4 1.4 0 0 1-.6 1.1l-1.7 1.2a1.4 1.4 0 0 1-1.8-.2L4.5 13.5Z" />
-              </CallButton>
-            </div>
-          )}
-
-          {shownAt > 0 && !showing && (
-            <p className="label mt-2 text-center" style={{ color: 'var(--ash)' }}>
-              shown to the teacher
-            </p>
-          )}
+          <div className="flex items-center justify-center gap-3">
+            <CallButton on={micOn} onClick={toggleMic} label={micOn ? 'Mute' : 'Unmute'}>
+              {micOn ? <Mic size={19} strokeWidth={1.75} /> : <MicOff size={19} strokeWidth={1.75} />}
+            </CallButton>
+            <CallButton
+              on={!showing}
+              onClick={showing ? closeViewfinder : openViewfinder}
+              label={showing ? 'Put the camera away' : 'Show the teacher something'}
+            >
+              {showing ? <VideoOff size={19} strokeWidth={1.75} /> : <Video size={19} strokeWidth={1.75} />}
+            </CallButton>
+            <CallButton on={false} danger onClick={stop} label="End the lesson">
+              <PhoneOff size={19} strokeWidth={1.75} />
+            </CallButton>
+          </div>
         </div>
       </div>
       </aside>
