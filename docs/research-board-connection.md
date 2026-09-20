@@ -9,13 +9,12 @@ Sources are tiered. **DOCUMENTED** = peer-reviewed or primary. **OPINION** =
 judgement. Where a number is quoted it was read from the source, not from a
 summary of it.
 
-> Note on completeness: two further strands — CSCW workspace-awareness, and
-> creative prior art in dynamic visual explanation — were researched but the
-> machine slept repeatedly and those agents lost their work before writing to
-> disk. What follows is what survived. The manim-voiceover bookmark mechanism
-> (marking a word in narration and syncing animation to it) remains the single
-> most promising unexplored lead, because it is our exact problem solved by
-> someone else.
+> Note on completeness: two further strands — CSCW workspace-awareness and
+> creative prior art in dynamic visual explanation — were researched but lost
+> when the machine slept repeatedly and those agents died before writing to
+> disk. The manim-voiceover bookmark mechanism (marking a word in narration and
+> syncing animation to it) remains the single most promising unexplored lead,
+> because it is our exact problem solved by someone else.
 
 ---
 
@@ -136,17 +135,62 @@ Stated plainly so it is not over-claimed later:
 
 ## Part 2 — What the student should do on the board
 
-### 2.1 The organising axis: hypothesis-space size
+### 2.1 The governing axis: hypothesis-space size
 
-If the tutor knows the **finite set of possible student inputs in advance**,
-recognition is a nearest-neighbour test against a known answer and cannot
-embarrass us. If it must transcribe **arbitrary ink**, it can.
+Rank student-input ideas by **how large the set of possible inputs is**, not by
+how much the student produces.
 
-The arithmetic that kills most recognition claims: 95% per-symbol accuracy over
-a 10-symbol line is 0.95¹⁰ ≈ **60% per line**. Vendor accuracy figures are
-per-symbol; students write lines.
+- **Closed set** — the system knows the candidates in advance. Recognition is a
+  hit-test or a nearest-neighbour check against a known target. It cannot
+  embarrass us.
+- **Open transcription** — arbitrary ink to symbols. It can, and in 2026 it does.
 
-### 2.2 ICAP — where the value actually is
+Our own compounding argument from `docs/spike-results.md` applies: 95% per-symbol
+accuracy over a 10-symbol line is 0.95¹⁰ ≈ 0.60 per line. A "95% accurate"
+recogniser gets a three-line derivation right about **22%** of the time. Vendor
+figures are per-symbol; students write lines.
+
+**Every real sketch tutor closed the hypothesis space, and none transcribed free
+handwriting for meaning.** Mechanix matches the student's sketch against one the
+*instructor* pre-drew. CogSketch Sketch Worksheets compare student to instructor
+sketch by analogy. Andes — the most deployed physics ITS ever built — used a
+palette and a dialog box and did no recognition at all.
+
+### 2.2 Recognition reality — the numbers that decide this
+
+**FERMAT**, "Can Vision-Language Models Evaluate Handwritten Math?"
+https://arxiv.org/abs/2501.07244 — 2,200+ handwritten solutions, 609 problems,
+grades 7–12, 9 VLMs. From Table 3 (https://arxiv.org/html/2501.07244v2):
+
+| Task | Gemini-1.5-Pro | GPT-4o |
+|---|---|---|
+| Error **detection** (balanced acc., chance 0.50) | 0.63 hw / 0.67 +OCR | 0.65 hw / 0.64 +OCR |
+| Error **localization** (acc.) | **0.43** hw / 0.56 +OCR | **0.45** hw / 0.50 +OCR |
+| Error **correction** (acc.) | 0.76 hw / 0.77 +OCR | 0.66 hw / 0.71 +OCR |
+
+A VLM finds **where** a student went wrong **under half the time**. Detection is
+13–15 points above a coin flip. Handing the model a clean transcription lifts
+localisation 0.43 → 0.56 but does not rescue it — the bottleneck is perception
+*and* reasoning, so a better OCR front end does not fix this.
+
+**And the failure is biased, not random.** "When VLMs 'Fix' Students"
+(https://arxiv.org/abs/2604.22774), 15 VLMs on FERMAT:
+
+> "Instead of faithfully transcribing a student's work, these models often 'fix'
+> errors, thereby hiding the very mistakes an educational assessment aims to
+> detect."
+
+GPT-4o is "heavily penalized for aggressive over-correction"; Gemini 2.5 Flash is
+the most faithful. **A VLM-transcription tutor systematically reads the student's
+wrong line as the right line and praises it.** That is strictly worse than not
+reading at all — and it is the exact failure this project has been avoiding
+elsewhere: a system claiming a state it has not reached.
+
+**Consequence: do not build free-form "student writes a derivation, teacher
+diagnoses it."** Revisit only if a benchmark shows handwriting localisation
+above ~0.85. Every idea below is closed-set, or uses ink without transcribing it.
+
+### 2.3 ICAP — where the value actually is
 
 **Chi & Wylie 2014**, *Educational Psychologist* 49(4):219–243.
 https://dunkin.eeb.ucsc.edu/images/documents/The_ICAP_Framework_Linking_Cognitive_Engagement_to_Active_Learning_Outcomes.pdf
@@ -155,36 +199,36 @@ https://dunkin.eeb.ucsc.edu/images/documents/The_ICAP_Framework_Linking_Cognitiv
 > greater than the Constructive mode, which is greater than the Active mode,
 > which in turn is greater than the Passive mode (I>C>A>P)."
 
-Three findings that bear directly on design decisions:
+Chi's criterion is **not the input device** — it is whether the output adds
+information not already present. Typing worked-out content is Constructive;
+typing a copy is Active. The keyboard is irrelevant.
 
-**Menus are demoted.** "Suppose a student's response ... consists of selecting an
-answer from a menu of choices; selecting is only *active* in our taxonomy in that
-the student does not generate a product." So a multiple-choice hint ladder is
-worth materially less than making the student produce something.
-
-**The physics FBD case is decided explicitly** (p.222): if a worked example has
+**The physics FBD case is decided explicitly** (p.222): if the worked example has
 no diagram and the student draws a free-body diagram, the student has
-*constructed*. If the diagram was already there and the student copied it, that
-is merely *active*. **Drawing the FBD is where the value is — so the teacher
-should not draw it first.**
+*constructed*; if the diagram was already there and the student copied it, that
+is merely *active*. **So the teacher drawing the FBD first destroys the thing
+that teaches.**
 
-**Pointing counts as Active** (p.222) — "pointing to or gesturing at what they
-are reading or solving (Alibali & DiRusso, 1999)" is listed among activities that
-exceed passive. So student-side deixis is real, if modest, value. With the
-caveat (p.224): "if students point instead at random figures on the whiteboard,
-then their behavior would not be considered a beneficial active one."
+**Menus are demoted** (p.223–4): "selecting is only *active* in our taxonomy in
+that the student does not generate a product."
 
-**And a diagnosis of the product as it stands** (p.223): "individual dialogue
-pattern tend to promote more learning for the dominant speaker, whereas both
-partners can benefit from joint dialogue pattern." *A board the teacher
-monopolises makes the teacher the learner.*
+**Pointing is Active** (p.222), and only when content-relevant — p.224: pointing
+"at random figures on the whiteboard" is not even beneficially active.
 
-An AI tutor does qualify as an Interactive partner — "a peer, a teacher, a
-parent, or computer agent (assuming the computer agent responds in a
-content-relevant way)" — on two conditions: both partners' utterances are
-primarily constructive, and there is sufficient turn-taking.
+**The practical lever: a tap becomes Constructive the moment the student has to
+say why.**
 
-### 2.3 Self-explanation
+**A diagnosis of the product as it stands** (p.223): "individual dialogue pattern
+tend to promote more learning for the dominant speaker, whereas both partners can
+benefit from joint dialogue pattern." *A board the teacher monopolises makes the
+teacher the learner.*
+
+An AI qualifies as the Interactive partner — "a peer, a teacher, a parent, or
+computer agent (assuming the computer agent responds in a content-relevant way)"
+— on two conditions: both partners' utterances primarily constructive, and
+sufficient turn-taking.
+
+### 2.4 Self-explanation
 
 **Chi, de Leeuw, Chiu & LaVancher 1994**, *Cognitive Science* 18(3):439–477.
 https://onlinelibrary.wiley.com/doi/10.1207/s15516709cog1803_3
@@ -193,29 +237,38 @@ Reporting Chi et al. 1989 on **physics** worked examples: the 4 students who
 scored **82%** on the posttest generated **15.3** self-explanations per example;
 the 4 who scored **46%** generated **2.8**. (Correlational, N=8.)
 
-The 1994 study itself is causal but on circulatory-system text, not physics. The
-mechanism worth copying is its prompt schedule: students were prompted to
-self-explain **after each line**. Line-granular and content-free — which maps
-exactly onto our per-line board writes.
+The 1994 study is causal but on circulatory-system text. The mechanism worth
+copying is its schedule: prompted **after each line** — line-granular and
+content-free, which maps exactly onto our per-line board writes.
 
-### 2.4 Drawing, with its boundary condition
+### 2.5 Drawing, with its boundary condition
 
-**Fiorella & Mayer 2015**: "Drawing was superior to control conditions in 26 of
-28 studies with a median effect size of **d = 0.40**." (Secondary summary.)
+**Fiorella & Mayer**: "Drawing was superior to control conditions in 26 of 28
+studies with a median effect size of **d = 0.40**." (Secondary summary, not read
+in primary.)
 
-But **unsupported drawing nulls out** — Frontiers in Psychology 2024,
-"Generative learning activities for online multimedia learning: when summarizing
-is effective but drawing is not."
+But **unsupported drawing nulls out** — Frontiers in Psychology 2024, "when
+summarizing is effective but drawing is not."
 https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2024.1452385/full
 
-The defensible claim is **production + scaffold + feedback**, not production
-alone. Which is precisely what a tutor watching the student draw can provide.
+The defensible claim is **production + scaffold + feedback**, never production
+alone. Which is exactly what a tutor watching the student draw can supply.
 
-### 2.5 The honest counterweight — interaction is not free value
+### 2.6 Productive failure — attempt before instruction
+
+**Sinha & Kapur 2021**, *Review of Educational Research* 91(5):761–798 —
+53 studies, 166 comparisons, favouring problem-solving *before* instruction:
+**Hedges' g = 0.36 (95% CI 0.20–0.51)**. Quoted verbatim from the open-access
+Kapur et al. 2022: https://www.frontiersin.org/articles/10.3389/feduc.2022.956416/full
+
+Mechanism 3: students "compare and contrast their solutions with the correct
+solutions during subsequent instruction" — **the board must hold the attempt and
+the correct version side by side.**
+
+### 2.7 The honest counterweight — interaction is not free value
 
 **VanLehn, Graesser, Jackson, Jordan, Olney & Rosé 2007**, *Cognitive Science*,
-"When Are Tutorial Dialogues More Effective Than Reading?" (7 experiments,
-qualitative physics). https://doi.org/10.1080/03640210709336984
+7 experiments, qualitative physics. https://doi.org/10.1080/03640210709336984
 
 > "When novices ... studied content that was written for intermediates ..., then
 > tutorial dialogue was reliably more beneficial than less interactive
@@ -223,108 +276,209 @@ qualitative physics). https://doi.org/10.1080/03640210709336984
 > novices or intermediates studied material written for intermediates, then
 > tutorial dialogue was not reliably more effective than the text-based control."
 
-**Interaction pays when the material is over the student's head.** Put the
-student-action moments where the student is actually stuck, not on a schedule.
+**Spend student-action moments where the student is actually stuck**, not on a
+schedule.
 
-### 2.6 Productive failure — attempt before instruction
+### 2.8 Turn-taking — the hardest number in the whole report
 
-**Sinha & Kapur 2021**, *Review of Educational Research* 91(5):761–798 —
-meta-analysis of 53 studies, 166 comparisons. Effect in favour of
-problem-solving *before* instruction: **Hedges' g = 0.36 (95% CI 0.20–0.51)**.
-Figure quoted from the open-access Kapur et al. 2022:
-https://www.frontiersin.org/articles/10.3389/feduc.2022.956416/full
+**Rowe 1972**, ERIC ED061103, read in primary.
+https://files.eric.ed.gov/fulltext/ED061103.pdf
 
-Mechanism 3 from the same paper: "prior knowledge activation affords students
-opportunities to compare and contrast their solutions with the correct solutions
-during subsequent instruction."
+> "Analysis of over 300 tape recordings showed mean wait-time to be on the order
+> of one second. ... When a student makes a response, the teacher reacts or asks
+> another question within an average time of 0.9 seconds."
 
-**Design consequence: the board should hold the student's attempt and the
-correct version side by side.** That is a board layout decision, and we have a
-two-column board already.
+And the finding that gives the mechanism:
 
-### 2.7 Against building an error library
+> "students discussing science phenomena tend to speak in bursts with intervals
+> of **three to five seconds** between bursts being fairly common. The average
+> post-student response wait-time of 0.9 seconds apparently intervenes between
+> bursts **to prevent completion of a thought**."
+
+At 3–5 s wait, across more than 900 tapes, nine student variables improve:
+response length, unsolicited appropriate responses, failures to respond (down),
+confidence, speculative responses, child-child comparisons, evidence-inference
+statements, student questions, and responses from students the teacher rates as
+slow. Rowe also found teachers already ration time by expectation — the top five
+students get nearly two seconds, the bottom five get 0.9.
+
+**A VAD-driven voice agent defaults to ~0.5–0.8 s. That is precisely the interval
+Rowe identifies as destroying the student's thought.** Our silence threshold
+after a student stops should be **≥3 s**.
+
+### 2.9 Against building an error library
 
 **Brown & Burton** (BUGGY/DEBUGGY) and **Brown & VanLehn 1980**, Repair Theory.
 https://onlinelibrary.wiley.com/doi/abs/10.1207/s15516709cog0404_3
 
-Documented limitation: the paradigm is "unable to explicitly represent the
-semantic nature of a bug or to explain how a bug was generated." Bug libraries
-are expensive, domain-specific, and sized for something as narrow as
-place-value subtraction.
-
-**Prefer mechanical checks over an error library.** Dimensional analysis, sign
-checks, limiting cases — cheap, general, and they cannot be wrong about physics.
-
-### 2.8 Codebase notes, verified against source
-
-- `src/board/units.ts` already converts pointer pixels ↔ board units
-  (`toPx`/`toUnits`). Student ink needs no new coordinate work.
-- `point` and `mark` already accept `"id"`, `"id:subexpr"` and `"fig.part"`.
-  **A student-side deixis event has an identical target grammar** — the addressing
-  scheme is already built.
-- **Correction to an assumption worth recording:** `units.ts` is *geometry*
-  units, not physical dimensions. A dimensional checker would be ~150 lines of
-  new code, not a reuse of something that exists.
-- Student-produced expressions must round-trip through the same plain-notation
-  converter in `src/teacher/latex.ts` that the model's output uses.
-- Any student action must route through **HOLD/COMMIT/RESUME**, or the reply
-  lands 5–13 s late — see §3.
+The documented limitation is that the paradigm cannot "explicitly represent the
+semantic nature of a bug," and libraries were hand-built at the scale of
+place-value subtraction. **Prefer mechanical checks** — dimensional analysis,
+sign checks, limiting cases. A physics error library is a research programme,
+not a feature.
 
 ---
 
-## Part 3 — What this means for our code
+## Part 3 — Ranked buildable ideas
 
-Concrete and checkable, in rough order of value per unit of work.
+Every one must route through **COMMIT** (flush queued audio, drop ops with
+`anchor > samplesPlayed`) or the 5–13 s tool-call lead makes the reply land
+6–13 s late.
 
-### 3.1 Split the tap into travel and apex
+### 1. Justify-the-pick — effort 1 — best ratio in the list
+After any student action the teacher marks what was touched and asks one "kyun?".
+The student answers **by voice**, which our stack already handles reliably.
+Semantics from speech, referent from the tap. **Converts an Active tap into
+Constructive/Interactive with zero recognition**, and satisfies both of Chi's
+Interactive criteria.
+*Risk:* our prompt is tuned to answer completely in one turn; this needs the
+opposite discipline at these moments. Fall back after ~6 s (two Rowe intervals)
+if the student will not talk.
 
-`src/teacher/pacing.ts` currently fires `point` as one lump, 850 ms before its
-anchor, and `scene.ts` gives it a 620 ms window whose pulse *decays from the
-first frame* — so the apex is at the start and the pen is already fading out
-while the teacher is still saying the word.
+### 2. Spot-the-error: the teacher plants a wrong line — effort 1–2
+The teacher writes a short derivation with exactly one wrong line: "inme se ek
+galat hai — dhoondh". **The model knows where the error is because it planted
+it** — 100% ground truth, against the 0.43 a VLM manages on real student work.
+*Risk:* the model must actually commit the planted error to the op log rather
+than "helpfully" writing it correctly — the same over-correction instinct
+documented in arXiv 2604.22774, here in generation. Verify against the written
+op, not the transcript. Once per demo; gimmicky if repeated.
 
-The research says the shape should be: **movement starts ~350 ms before the
-word, the apex lands on it, and then it holds.** Since `PenTrack` already
-computes travel time from distance, the tap should be anchored and travel
-derived, rather than one number standing for both.
+### 3. Commit-before-reveal: the board locks until the student predicts — effort 2
+At a decision point the teacher writes 2–4 candidate next-lines as chalk options
+with ids and **refuses to write the next line** until the student taps one. Closed
+set of existing board objects, so "recognition" is a hit-test. On a wrong pick,
+do not say wrong — keep the pick on the board and work the consequence until it
+contradicts something.
+*Risk:* our prompt currently forbids stopping to ask permission, so this needs a
+distinct "real question" affordance or the model talks past its own lock.
 
-### 3.2 Give the tap a minimum hold
+### 4. Stroke-burst turn-taking — effort 2
+Pen-down HOLDs teacher audio within the existing ~150 ms barge-in budget. The
+teacher does **not** resume on pen-up; it waits 3 s of pen-idle. A short pen-up
+inside a burst is not a turn boundary; a 3 s gap is.
+*Tier split, and it matters:* **DOCUMENTED** — the 3–5 s burst gaps and the 0.9 s
+intrusion (Rowe, primary). **OPINION** — that a *writing* student's stroke bursts
+have the same structure as a *speaking* student's speech bursts. Nobody has
+measured pen-idle gaps; 3 s is an inference and the first constant to tune.
+*Risk:* palm-rest false triggers — require a deliberate press or stylus only.
 
-A fixation takes ~102 ms to arrive. The pen should rest on the target for at
-least ~200 ms after the apex before it is allowed to travel onward. Currently
-nothing prevents the next op yanking it away immediately.
+### 5. Place-the-vector: closed-set sketching against named anchors — effort 3
+The teacher draws the body only; the student drags chevrons onto it, snapping to
+the figure's named compass anchors (`block.north` — the TikZ convention already
+adopted) and angle buckets. The op carries `{anchor, angle_bucket, force_name}`
+— a tuple from a closed set. The teacher gets structure, never a transcription.
+Genuinely ICAP-Constructive, because the diagram was not already present.
+*Needs* the chevron/anchor primitive layer that `docs/feature-research.md`
+already schedules before figure #1.
 
-### 3.3 Write down the asymmetry rule
+### 6. Side-by-side: the student's attempt stays next to the correct line — effort 2
+Whatever the student produced is never erased; it moves to a parallel dimmer
+column keeping its `author` field, and the teacher points between the two. Our
+planned student layer and `author` field are exactly the right substrate, and
+replay then shows both tracks in the time-lapse.
+*Risk:* board real estate — `units.ts` splits DERIVATION (5.2u) / FIGURE with no
+third column. That is a layout decision, not just a render.
 
-Early is cheap (125 ms unnoticed), late is expensive (45 ms noticed). Anywhere
-the scheduler rounds, it should round early. This belongs as a comment in the
-scheduler, because the next person to tune it will not know.
+### 7. Student ink the teacher never reads — effort 2 — OPINION
+Let the student write freely; the teacher **never transcribes it**, only points
+at regions and asks the student to narrate. Ink stores as polylines, and our
+chalk pipeline already takes `d` strings so student ink renders natively.
+*Risk:* the illusion breaks the instant the teacher says anything specific about
+content it cannot see. The prompt must forbid claims about student ink. This is
+the honest way to have handwriting in a 2026 demo.
 
-### 3.4 Point instead of describing position
+### 8. Dimensional check on any student-committed expression — effort 3
+Mechanically exact, no ML, no false positives.
+*Correction to an assumption worth recording:* `src/board/units.ts` is
+**geometry** units (Manim board coordinates, `toPx`/`toUnits`), not physical
+dimensions. A dimensional engine is ~150 lines of new code, not a reuse.
+*Risk:* catches only dimensional errors — sign errors, wrong-body errors and
+wrong formulae all pass clean, so never present a pass as "correct".
 
+### Deliberately not recommended
+- **Full handwritten-expression recognition for diagnosis** — FERMAT
+  localisation 0.43 plus systematic over-correction bias.
+- **A physics buggy-rule library** — documented as expensive and non-transferable.
+- **Selling sketch input on learning outcomes.** The readable Mechanix evaluation
+  reports a **null** result: "there was no change in the homework and concept
+  inventory scores between both groups" (confounded by a server failure, N=122
+  recruited). Only liking and motivation were positive. Take the learning claim
+  from ICAP and productive failure instead.
+
+### Two design facts worth copying verbatim from the real systems
+- **Mechanix takes quantities through form fields with a unit dropdown**, never
+  handwritten numerals (ASEE 2012 p.5). *Geometry by sketch, quantities by
+  widget.*
+- **Misrecognition is absorbed by an explicit loop, not hidden**: "Students are
+  allowed to correct any errors in their work and resubmit until the entire
+  content is correct." The student is always the arbiter of what they meant.
+- Newton's Pen took the opposite bet and paid for it — it "relies on a particular
+  digital pen and input technology, constraining the user to draw the sketches in
+  a very particular way and order."
+
+---
+
+## Part 4 — Implications for our code
+
+### 4.1 Split the tap into travel and apex
+`src/teacher/pacing.ts` fires `point` as one lump 850 ms before its anchor, and
+`scene.ts` gives it a 620 ms window whose pulse **decays from the first frame** —
+so the apex is at the start and the pen is already fading while the teacher is
+still saying the word. Per §1.1 the shape should be: movement starts ~350 ms
+before the word, apex lands on it, then it holds. `PenTrack` already computes
+travel from distance, so the tap should be anchored and travel derived.
+
+### 4.2 Give the tap a minimum hold
+A fixation takes ~102 ms to arrive. The pen should rest on target for ≥~200 ms
+after the apex before it may travel onward. Nothing currently stops the next op
+yanking it away.
+
+### 4.3 Write down the asymmetry rule
+Early is cheap (125 ms unnoticed), late is expensive (45 ms noticed). Wherever
+the scheduler rounds, it should round early — as a comment in the scheduler,
+because the next person to tune it will not know.
+
+### 4.4 Raise the post-student silence threshold to ≥3 s
+Currently VAD-driven and in the 0.5–0.8 s range, which is exactly the interval
+Rowe identifies as cutting the student off between thought-bursts. This is the
+cheapest change in the document and one of the best evidenced.
+
+### 4.5 Point instead of describing position
 Bangerter: pointing suppresses verbal location description. The prompt should
-tell the teacher to point rather than say "the second line from the top" — it is
-both more natural and shorter, which matters when every token is time.
+tell the teacher to point rather than say "the second line from the top" — more
+natural, and shorter, which matters when every token is time.
 
-### 3.5 Wait three seconds
+### 4.6 Stop drawing the diagram the student should draw
+When the FBD figure is built, the default should be that the teacher sets up the
+situation and *asks*, rather than drawing it. ICAP p.222 decides this case
+explicitly.
 
-After a check question, ≥3 s. Manual-activity mode already means we are not
-racing the student, but nothing currently enforces that the teacher does not
-fill the silence itself.
+---
 
-### 3.6 Stop drawing the diagram the student should draw
+## Open questions and known gaps
 
-The strongest single pedagogical finding here (ICAP p.222, plus Rosengrant on
-FBDs) is that the student drawing the free-body diagram is where the learning
-is, and the teacher drawing it first destroys exactly that. When the FBD figure
-gets built, the default should be that the teacher sets up the situation and
-*asks*, not draws.
+**The largest unvalidated assumption.** Ideas 1–5 are all deictic — tap to
+choose, drag to place, tap to refer. That vocabulary was chosen for *recognition
+safety*, not because elicitation research supports it. No gesture-elicitation
+study on what learners spontaneously reach for at a shared display could be
+retrieved (Oviatt's multimodal percentages are paywalled).
 
-### 3.7 Prefer a bounded hypothesis space for student input
+**Open question for take 1: does a student tap, or circle/lasso, when asked
+"which one?"** If they circle, ideas 2 and 3 need a lasso hit-test rather than a
+point hit-test — cheap to add, but only if we know. This is the cheapest thing to
+learn from the first real take, and it is upstream of four ranked ideas.
 
-Rather than transcribing arbitrary handwriting (0.95¹⁰ ≈ 60% per line), start
-where the tutor knows the candidate set: place a vector, choose which of two
-drawn options is wrong, drag a value. Recognition then cannot embarrass us. Note
-the ICAP trade-off honestly, though — selection is only *Active*, so this is the
-safe version, not the valuable one. The valuable one is the student producing a
-diagram.
+**A correction to this project's own brief:** AnimalWatch was cited as a
+sketch-recognition tutor. It does not appear in that lineage. Mechanix's own
+related-work section, by the leading sketch-tutor lab, enumerates the systems
+that evaluate a student's FBD sketch — Andes, WinTruss, VaNTH ERC FBD Assistant,
+Newton's Pen — and states: "None (but Newton's Pen) evaluate the student's sketch
+of a FBD."
+
+**Do not cite these as facts** — attempted and not verified: Mechanix recognition
+accuracy; CROHME ExpRate and current handwritten-maths SOTA; MyScript / Mathpix /
+ML Kit accuracy, browser support and latency; Oviatt's percentages; VanLehn 2011
+ITS-vs-human effect sizes; Rosengrant 2009 exact percentages (direction verified
+from the abstract only); Newton's Pen and CogSketch measured results;
+Fiorella & Mayer's d = 0.40 (secondary summary only).
