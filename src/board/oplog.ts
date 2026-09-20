@@ -28,7 +28,7 @@ export interface Placement {
   resolved: Pt;
 }
 
-export type MarkStyle = 'underline' | 'circle' | 'strike' | 'box';
+export type MarkStyle = 'underline' | 'circle' | 'strike' | 'box' | 'cancel';
 
 interface Common {
   /** Scene time in ms at which this op fires. */

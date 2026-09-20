@@ -41,7 +41,7 @@ export interface DispatchResult {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
-const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box'];
+const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box', 'cancel'];
 
 /** Every id still on the board, in the order the teacher put them there. */
 function liveIds(scene: Scene): string[] {

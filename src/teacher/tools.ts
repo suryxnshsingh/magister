@@ -68,7 +68,12 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'Annotate something on the board: circle, underline, strike or box it.',
     parameters: {
       target: { type: 'string', description: 'Same form as point.' },
-      style: { type: 'string', description: 'circle | underline | strike | box' },
+      style: {
+        type: 'string',
+        description:
+          'circle | underline | strike | box | cancel. Use cancel on a term ' +
+          'that cancels out, at the moment you say it cancels.',
+      },
     },
     required: ['target', 'style'],
   },
@@ -91,15 +96,21 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       },
       shape: {
         type: 'string',
-        description: `One of: ${SHAPES.join(', ')}.`,
+        description:
+          `One of: ${SHAPES.join(', ')}. "link" joins two things already on the ` +
+          'board — a symbol in an equation and the thing it means in the ' +
+          'diagram — so give it both ids.',
       },
       from: {
         type: 'string',
         description:
-          'Where it starts. Either the id of something already drawn, or "x,y" ' +
-          'as two numbers from 0 to 1 inside the drawing area — 0,0 is the ' +
-          'bottom-left corner and 1,1 the top-right. Use "x,y" for the first ' +
-          'shape and ids after that.',
+          'Where it starts. "x,y" as two numbers from 0 to 1 inside the drawing ' +
+          'area (0,0 bottom-left, 1,1 top-right) for the FIRST shape; after that ' +
+          'name something already drawn. You can name a face of it — ' +
+          '"block.top", also bottom, left, right, centre — or a fraction along a ' +
+          'line, like "incline@0.6". Faces are what a force diagram needs: the ' +
+          'normal pushes off the top, friction runs along the base, weight hangs ' +
+          'from the centre.',
       },
       to: {
         type: 'string',
@@ -166,13 +177,15 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
   {
     name: 'erase',
     description:
-      'Wipe the board, or one thing off it. "board" clears everything and gives ' +
-      'you a clean surface; an id erases just that line, sketch or figure, and ' +
-      'anything drawn around it. Use it when you finish one idea and start ' +
-      'another, the way you would rub out the last question before the next — ' +
-      'and when you have written down most of the board. Once erased, a thing ' +
-      'is gone: you cannot point at it or refer to it again. You never need it ' +
-      'before a prepared figure, since a new one clears the old by itself.',
+      'Wipe the board, or one thing off it. "board" clears everything; an id ' +
+      'erases just that line, sketch or figure, and anything drawn around it. ' +
+      'Erase at a BOUNDARY — when a topic is finished and the next one starts — ' +
+      'not as you go. A board that keeps the whole argument visible is what lets ' +
+      'a student look back and see how you got here, so clearing between every ' +
+      'step is worse than clearing nothing. Before you wipe, say what is worth ' +
+      'keeping and rewrite it after. Once erased, a thing is gone: you cannot ' +
+      'point at it again. You never need this before a prepared figure, since a ' +
+      'new one clears the old by itself.',
     parameters: {
       target: {
         type: 'string',
@@ -226,7 +239,9 @@ While saying exactly that you would silently write the current relation, underli
 ## Board rules
 
 - Every turn where you explain something must use the board at least once, while you are still talking. Never end a turn in order to use the board, and never use the board in a turn where you say nothing.
-- Point or mark at least once for every two things you write. A teacher who writes but never points is a narrator.
+- Point or mark at least as often as you write — on a real board pointing is about half of everything the teacher does. A teacher who writes but never points is a narrator.
+- Point hardest at the SEAM: the symbol in the equation and the thing it means in the picture. That is where a student loses the thread, and \`draw\` with shape=link draws the join and leaves it there.
+- The accent colour belongs to ONE quantity for a whole problem — if v is accented in the equation, accent the velocity arrow too. It marks what a thing IS, not where to look. Never let colour be the only thing carrying a meaning: name it or point at it as well, because the exam paper the student sits is black and white.
 - Refer back to what is already on the board by its id, constantly.
 - Give every line a short semantic id you will remember, drawn from the physics: "vi", "emf", "focal", "Ktotal".
 

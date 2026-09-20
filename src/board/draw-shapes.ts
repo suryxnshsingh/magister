@@ -21,6 +21,7 @@
  *  - **Chalk by default.** Roughened on the same generator as the figures, so
  *    a sketch and a template cannot be told apart.
  */
+import { splitAll } from './chalk/subpaths';
 import { arcD, arrowD, CHALK, dashedD, DIM, SVG_NS, YELLOW } from './templates/primitives';
 import type { Pt } from './units';
 import rough from 'roughjs';
@@ -33,7 +34,8 @@ export type Shape =
   | 'box'
   | 'dot'
   | 'label'
-  | 'angle';
+  | 'angle'
+  | 'link';
 
 export const SHAPES: Shape[] = [
   'arrow',
@@ -44,6 +46,7 @@ export const SHAPES: Shape[] = [
   'dot',
   'label',
   'angle',
+  'link',
 ];
 
 export interface ShapeSpec {
@@ -67,9 +70,12 @@ export interface BuiltShape {
 const gen = rough.generator();
 
 function roughen(d: string, roughness = 0.9): string[] {
-  return gen
-    .toPaths(gen.path(d, { roughness, strokeWidth: 3, bowing: 1 }))
-    .map((p) => p.d);
+  // One element per subpath: rough.js answers with a single path holding both
+  // of its passes (eight, for a rectangle), and a dash offset restarts at each
+  // one — so undivided they all grow at once instead of being drawn in order.
+  return splitAll(
+    gen.toPaths(gen.path(d, { roughness, strokeWidth: 3, bowing: 1 })).map((p) => p.d),
+  );
 }
 
 function colourOf(c: ShapeSpec['colour']) {
@@ -88,7 +94,9 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
   g.setAttribute('data-draw', id);
   g.setAttribute('fill', 'none');
 
-  const stroke = colourOf(spec.colour);
+  // A link is construction, not content: it says two things already on the
+  // board are the same thing, so it defaults to the dimmer chalk.
+  const stroke = colourOf(spec.colour ?? (spec.shape === 'link' ? 'dim' : undefined));
   const paths: SVGPathElement[] = [];
   const fades: SVGElement[] = [];
 
@@ -173,6 +181,40 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
       t.style.opacity = '0';
       g.appendChild(t);
       fades.push(t);
+      break;
+    }
+
+    case 'link': {
+      // A connector between two representations of the same physics — the
+      // symbol in the equation and the thing it denotes in the diagram.
+      //
+      // Worth its own primitive rather than being a `line`, for three reasons.
+      // It bows, so it reads as a gesture joining two things rather than as
+      // part of either. It is dim by default, because it is about the other
+      // two marks and must not compete with them. And it is trimmed to the
+      // edges of what it joins by the caller, so it never crosses the ink at
+      // either end.
+      //
+      // Teaching a term and its picture as one thing is the best-evidenced
+      // move in the board research: multi-representation learning carries a
+      // real (if modest) effect, and observation of expert boards has the
+      // teacher literally drawing lines between the diagram and the equation
+      // when a pupil cannot connect them. It is also the one gesture a
+      // single-pen board can make that a two-handed teacher makes by holding
+      // one hand on each — it indexes both at once, and it stays.
+      if (b) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        // Bowed perpendicular to the chord, away from the shorter axis so a
+        // link across the board arcs over the gap rather than through it.
+        const bow = Math.min(90, len * 0.16);
+        const cx = (a.x + b.x) / 2 - (dy / len) * bow;
+        const cy = (a.y + b.y) / 2 + (dx / len) * bow;
+        for (const d of roughen(`M${a.x},${a.y}Q${cx},${cy} ${b.x},${b.y}`, 0.8)) {
+          path(d, 2.2);
+        }
+      }
       break;
     }
 

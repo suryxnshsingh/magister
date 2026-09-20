@@ -13,7 +13,7 @@
  */
 import { createDraw, createFadeIn, createWipe } from './animations/draw';
 import { createWrite, type WriteAnimation } from './animations/write';
-import { bboxIn, createMark, unionBox, type BBox } from './annotate/marks';
+import { bboxIn, createMark, pointIn, unionBox, type BBox } from './annotate/marks';
 import { interruptAt, resumeAt, SceneClock, type Animation } from './clock';
 import { handJitter, roughenGlyphs } from './chalk/roughen';
 import { findPart, typeset, DEFAULT_EM } from './math/mathjax';
@@ -214,10 +214,23 @@ export class Scene {
     const to = op.to ? this.anchorOf(op.to) : null;
     const to2 = op.to2 ? this.anchorOf(op.to2) : null;
 
+    // A link joins two things, so it is drawn between their edges rather than
+    // from the middle of one to the middle of the other.
+    let a = from.pt;
+    let b = to?.pt ?? null;
+    if (op.shape === 'link' && op.to) {
+      const ba = this.boxOf(op.from);
+      const bb = this.boxOf(op.to);
+      if (ba && bb) {
+        a = edgeToward(ba, centreOf(bb));
+        b = edgeToward(bb, centreOf(ba));
+      }
+    }
+
     const built = buildShape(op.id, {
       shape: op.shape as Shape,
-      from: from.pt,
-      to: to?.pt ?? null,
+      from: a,
+      to: b,
       to2: to2?.pt ?? null,
       text: op.text,
       colour: op.colour,
@@ -424,6 +437,27 @@ export class Scene {
    * generous circle beats a teacher who points at nothing.
    */
   /**
+   * A point on a stroke already drawn, `t` of the way along it.
+   *
+   * The first subpath is the one measured. rough.js draws everything twice and
+   * either pass traces the same shape, so six-tenths along the first is six
+   * tenths along the thing itself — which is what "put the block here on the
+   * incline" means.
+   */
+  private pointAlong(ref: string, t: number): Pt | null {
+    const host =
+      this.drawings.get(ref) ??
+      (ref.includes('.')
+        ? this.figures.get(ref.split('.')[0])?.tpl.parts.get(ref.split('.').slice(1).join('.'))
+        : undefined);
+    const path = host?.querySelector('path');
+    if (!path) return null;
+    const len = path.getTotalLength();
+    if (!len) return null;
+    return pointIn(path, path.getPointAtLength(len * Math.max(0, Math.min(1, t))), this.root);
+  }
+
+  /**
    * Resolve a `draw` anchor to a point in root pixel space.
    *
    * One grammar, extending the one `point`/`mark` already use: an id, an
@@ -431,6 +465,16 @@ export class Scene {
    * normalised "x,y" inside the figure column, origin bottom-left, y up.
    * Offering three interchangeable address forms would mean three resolution
    * paths to debug and a model that picks between them at random.
+   *
+   * Two suffixes name a place ON a thing rather than the thing, because the
+   * centre of a box is the one point a physics diagram almost never wants:
+   * weight hangs from the middle, but the normal pushes off the TOP face and
+   * friction runs ALONG the base. Without them a free-body diagram cannot be
+   * drawn from anchors at all and the model is forced back to raw coordinates,
+   * which is the thing anchoring exists to avoid.
+   *
+   *   "block.top"    the middle of an edge — top, bottom, left, right, centre
+   *   "incline@0.6"  six tenths of the way along a stroke already drawn
    */
   anchorOf(ref: string): { pt: Pt; clamped: boolean } | null {
     const m = /^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/.exec(ref ?? '');
@@ -445,9 +489,27 @@ export class Scene {
       });
       return { pt, clamped: u !== rawU || v !== rawV };
     }
+
+    const along = /^(.+)@([\d.]+)$/.exec(ref);
+    if (along) {
+      const pt = this.pointAlong(along[1], Number(along[2]));
+      if (pt) return { pt, clamped: false };
+    }
+
+    const dot = ref.lastIndexOf('.');
+    const side = dot > 0 ? SIDES[ref.slice(dot + 1).toLowerCase()] : undefined;
+    if (side) {
+      // Tried after the figure-part lookup inside boxOf, so a part genuinely
+      // named "left" still wins over the edge of the figure holding it.
+      const whole = this.boxOf(ref);
+      if (whole) return { pt: centreOf(whole), clamped: false };
+      const host = this.boxOf(ref.slice(0, dot));
+      if (host) return { pt: side(host), clamped: false };
+    }
+
     const b = this.boxOf(ref);
     if (!b) return null;
-    return { pt: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, clamped: false };
+    return { pt: centreOf(b), clamped: false };
   }
 
   boxOf(target: string): BBox | null {
@@ -457,11 +519,17 @@ export class Scene {
     if (drawn) return bboxIn(drawn, this.root);
 
     // A figure part — "fig.apex" — is addressed with a dot, so the teacher can
-    // point into a construction rather than only at it.
+    // point into a construction rather than only at it. Only a FIGURE id takes
+    // this branch: it used to claim every dotted name and answer null for the
+    // rest, which made "block.top" unresolvable before anything could offer to
+    // resolve it.
     if (target.includes('.')) {
       const [tid, ...rest] = target.split('.');
-      const el = this.figures.get(tid)?.tpl.parts.get(rest.join('.'));
-      return el ? bboxIn(el, this.root) : null;
+      const fig = this.figures.get(tid);
+      if (fig) {
+        const el = fig.tpl.parts.get(rest.join('.'));
+        return el ? bboxIn(el, this.root) : null;
+      }
     }
 
     const { id, part } = parseTarget(target);
@@ -621,6 +689,40 @@ export class Scene {
       .map((o) => `${o.id}: "${o.content}"${o.partial ? ' [PARTIAL]' : ''}`)
       .join('\n');
   }
+}
+
+/** Where on a box each named side sits. */
+const SIDES: Record<string, (b: BBox) => Pt> = {
+  top: (b) => ({ x: b.x + b.w / 2, y: b.y }),
+  bottom: (b) => ({ x: b.x + b.w / 2, y: b.y + b.h }),
+  left: (b) => ({ x: b.x, y: b.y + b.h / 2 }),
+  right: (b) => ({ x: b.x + b.w, y: b.y + b.h / 2 }),
+  centre: (b) => centreOf(b),
+  center: (b) => centreOf(b),
+};
+
+function centreOf(b: BBox): Pt {
+  return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+}
+
+/**
+ * The point on a box's edge facing `toward`, with a little air after it.
+ *
+ * A connector drawn centre to centre starts underneath the very thing it is
+ * pointing out. This walks the direction out to the boundary instead, so a
+ * link leaves an equation at its edge and arrives at the diagram's.
+ */
+function edgeToward(b: BBox, toward: Pt, gap = 12): Pt {
+  const c = centreOf(b);
+  const dx = toward.x - c.x;
+  const dy = toward.y - c.y;
+  const len = Math.hypot(dx, dy);
+  if (!len) return c;
+  const scale = Math.min(
+    dx ? b.w / 2 / Math.abs(dx) : Infinity,
+    dy ? b.h / 2 / Math.abs(dy) : Infinity,
+  );
+  return { x: c.x + dx * scale + (dx / len) * gap, y: c.y + dy * scale + (dy / len) * gap };
 }
 
 /**

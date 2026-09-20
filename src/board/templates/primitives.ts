@@ -14,6 +14,7 @@
  */
 import rough from 'roughjs';
 
+import { splitAll } from '../chalk/subpaths';
 import type { Pt } from '../units';
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -136,9 +137,13 @@ export class FigureParts {
 
   /** Roughen a clean path so it reads as chalk rather than plotter output. */
   rough(d: string, roughness = 0.9): string[] {
-    return this.gen
-      .toPaths(this.gen.path(d, { roughness, strokeWidth: 3, bowing: 1 }))
-      .map((p) => p.d);
+    // Split per subpath — see chalk/subpaths.ts. A figure's arcs and arrows
+    // are drawn in order because of this, not despite it.
+    return splitAll(
+      this.gen
+        .toPaths(this.gen.path(d, { roughness, strokeWidth: 3, bowing: 1 }))
+        .map((p) => p.d),
+    );
   }
 
   /**
