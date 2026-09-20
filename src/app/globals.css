@@ -1,26 +1,140 @@
 @import "tailwindcss";
 
+/**
+ * Night lecture hall.
+ *
+ * One lit board in a dark, warm room. The board is the only saturated surface
+ * in the product and the only thing that looks like a light source; every other
+ * tone is a near-black warmed slightly, as if lit BY the board rather than by
+ * its own backlight. That is the whole idea, and it is why there are no other
+ * greens, no blue-blacks, and no panel chrome competing with the chalk.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Warm near-blacks. Never blue — a blue-black reads as a screen, a warm
+     black reads as a room with the lights off. */
+  --void: #0a0908;
+  --raised: #12100e;
+  --hairline: #24211d;
+
+  /* The only green in the application. */
+  --board: #1d2b26;
+  --board-lit: #24352e;
+  --board-deep: #141d19;
+
+  /* Chalk and its dust. */
+  --chalk: #efeade;
+  --chalk-soft: #b5afa1;
+  --ash: #6a645a;
+
+  /* The person in the room. Amber, so "ready" never needs green. */
+  --ember: #d99a3f;
+  --ember-dim: #8a6427;
+
+  /* States that are neither chalk nor ember. */
+  --slate: #8698a8;
+  --violet: #a294d4;
+  --rust: #c9674c;
+
+  --font-speech: var(--font-speech);
+  --font-mono: var(--font-mono);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-void: var(--void);
+  --color-raised: var(--raised);
+  --color-hairline: var(--hairline);
+  --color-board: var(--board);
+  --color-chalk: var(--chalk);
+  --color-chalk-soft: var(--chalk-soft);
+  --color-ash: var(--ash);
+  --color-ember: var(--ember);
+  --color-slate: var(--slate);
+  --color-violet: var(--violet);
+  --color-rust: var(--rust);
+  --font-speech: var(--font-speech);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+html,
+body {
+  background: var(--void);
+  color: var(--chalk-soft);
+  font-family: var(--font-speech), Georgia, serif;
+}
+
+/**
+ * Paper grain over the whole room.
+ *
+ * A flat near-black reads as "unset background"; a grain reads as a surface.
+ * Static and pointer-events-none, so it costs one composite and nothing else —
+ * unlike an animated filter, which would re-evaluate every frame the board
+ * draws.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Small caps mono, for status and labels. */
+.label {
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* One staggered reveal on load beats scattered micro-interactions. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.rise {
+  animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.breathe {
+  animation: breathe 1.9s ease-in-out infinite;
+}
+
+/* The one control on the idle screen earns a real hover. */
+.group:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.group:active {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .breathe {
+    animation: none;
+  }
+  .group:hover {
+    transform: none;
+  }
+}
+
+/* KaTeX inherits the chalk tone rather than shouting white. */
+.katex {
+  font-size: 1em;
+  color: inherit;
 }
