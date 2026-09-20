@@ -117,16 +117,25 @@ function ReplayInner() {
       if (penRef.current && !penEls.current) {
         penEls.current = createPenElements(penRef.current);
       }
+      const end = log.duration + TAIL_MS;
       scene.clock.onTick((now) => {
         // Written straight to the DOM in the same tick as the ink, so the tip
         // never trails the stroke it is making.
         const p = scene.pen.at(now);
         renderPen(penEls.current, p);
-        setT(now);
+        setT(Math.min(now, end));
         setPenMode(p.mode);
         setSummary(scene.summary());
+        // Stop at the end of the lesson. Left running, the clock climbs past
+        // the last op forever — the scrub bar pins at maximum and the readout
+        // claims a length the lesson does not have. It matters most at 8x,
+        // where the overrun arrives eight times faster.
+        if (now >= end) {
+          scene.clock.freeze();
+          setPlaying(false);
+        }
       });
-      setDur(log.duration + TAIL_MS);
+      setDur(end);
       scene.clock.setRate(rate);
       scene.clock.seek(0);
       scene.clock.start();
@@ -159,10 +168,13 @@ function ReplayInner() {
       c.freeze();
       setPlaying(false);
     } else {
+      // Play at the end means play again. Without this the clock starts,
+      // immediately trips the end check, and the button looks broken.
+      if (dur > 0 && c.time >= dur) c.seek(0);
       c.start();
       setPlaying(true);
     }
-  }, []);
+  }, [dur]);
 
   const restart = useCallback(async () => {
     const scene = sceneRef.current;
