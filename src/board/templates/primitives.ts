@@ -171,6 +171,27 @@ export class FigureParts {
   }
 
   /**
+   * A small filled dot — a point of incidence, a pole, a focus.
+   *
+   * Faded in rather than stroked: a dot has no length to trace, and a circle
+   * drawn by dash offset at this size reads as a flicker.
+   */
+  dot(name: string, at: Pt, r = 6, fill = CHALK) {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('data-part', `${this.id}.${name}`);
+    const c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('cx', String(at.x));
+    c.setAttribute('cy', String(at.y));
+    c.setAttribute('r', String(r));
+    c.setAttribute('fill', fill);
+    c.style.opacity = '0';
+    g.appendChild(c);
+    this.root.appendChild(g);
+    this.parts.set(name, g);
+    return c;
+  }
+
+  /**
    * A text label, faded in rather than stroked.
    *
    * MathJax emits `<use>` references into glyph defs, which are not

@@ -145,18 +145,8 @@ export function createRay(
     p.kind === 'reflection' ? 4 : 3,
   );
 
-  const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   const op = P(O);
-  dot.setAttribute('cx', String(op.x));
-  dot.setAttribute('cy', String(op.y));
-  dot.setAttribute('r', '6');
-  dot.setAttribute('fill', CHALK);
-  dot.style.opacity = '0';
-  const dotG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  dotG.setAttribute('data-part', `${id}.point`);
-  dotG.appendChild(dot);
-  f.root.appendChild(dotG);
-  f.parts.set('point', dotG);
+  const dot = f.dot('point', op, 6, CHALK);
 
   // ---- angle arcs, measured from the NORMAL -------------------------------
   // This is the whole teaching point, so the arcs sit against the normal and

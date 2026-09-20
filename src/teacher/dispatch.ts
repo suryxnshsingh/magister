@@ -19,7 +19,7 @@ import { figureNames, getFigure } from '@/board/templates';
 import type { ToolCall } from '@/voice/session';
 
 import { evaluate } from './calc';
-import { normaliseContent } from './latex';
+import { normaliseContent, toTypesettable } from './latex';
 
 export interface DispatchResult {
   /**
@@ -75,9 +75,10 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       }
       const { latex, wasCorrupted } = normaliseContent(raw);
       // Measure before placing: the layout manager needs the height to know
-      // where the next line can go.
-      const inner = latex.replace(/^\s*\$|\$\s*$/g, '');
-      const m = measure(inner);
+      // where the next line can go — and it has to measure the same string the
+      // board will typeset, or a line of prose is measured as maths and the
+      // one under it lands on top of it.
+      const m = measure(toTypesettable(raw));
       const place = scene.resolvePlace(str(a.place) || undefined, m.height);
 
       // An id already in use would orphan every later reference to the

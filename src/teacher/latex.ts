@@ -201,6 +201,55 @@ export function normaliseMath(input: string): Normalised {
  * so "Horizontal speed constant hai" stays prose while "$u cos(theta)$" becomes
  * maths.
  */
+/**
+ * Escape a run of prose so TeX renders it as the words that were written.
+ *
+ * Only the characters that would otherwise be read as syntax. A backslash is
+ * dropped rather than escaped: prose is not supposed to contain one, and a
+ * stray `\textbackslash` on a blackboard is worse than a missing mark.
+ */
+function escapeProse(run: string): string {
+  return run
+    .replace(/\\/g, '')
+    .replace(/([{}&#%_$])/g, '\\$1')
+    .replace(/\^/g, '\\textasciicircum{}')
+    .replace(/~/g, '\\textasciitilde{}');
+}
+
+/**
+ * One TeX string for a whole line, with the prose in text mode.
+ *
+ * This is the difference between a sentence and a smear. Everything handed to
+ * MathJax is typeset as MATHS unless it is wrapped, and maths mode gives a
+ * space no width at all — so "Kaunsa chapter padhein aaj?" came out as
+ * `Kaunsachapterpadheinaaj?`, in italics, with every space silently dropped.
+ *
+ * Splitting on the `$...$` spans and wrapping the rest in `\text{}` keeps the
+ * spaces, sets the words upright, and leaves the maths in the mode it belongs
+ * in — so one line can be half sentence and half equation, which is how a
+ * teacher actually writes.
+ */
+export function toTypesettable(content: string): string {
+  const normalised = normaliseContent(content).latex;
+  const out: string[] = [];
+  let i = 0;
+  const span = /\$([^$]*)\$/g;
+  for (let m = span.exec(normalised); m; m = span.exec(normalised)) {
+    if (m.index > i) out.push(`\\text{${escapeProse(normalised.slice(i, m.index))}}`);
+    out.push(m[1]);
+    i = m.index + m[0].length;
+  }
+  if (i < normalised.length) {
+    const tail = normalised.slice(i);
+    // A line that is nothing but maths never needed wrapping in the first
+    // place, and wrapping it would set the symbols upright.
+    out.push(out.length === 0 && !/\$/.test(normalised) && /[=^_\\]/.test(tail)
+      ? tail
+      : `\\text{${escapeProse(tail)}}`);
+  }
+  return out.join('');
+}
+
 export function normaliseContent(content: string): Normalised {
   let corrupted = false;
   let sawLatex = false;

@@ -22,7 +22,7 @@ import { PenTrack, tapWindow, windowsOf, type PenWindow } from './pen';
 import { type Template } from './templates/projectile';
 import { getFigure, parseParams, stepOfPart } from './templates';
 // Importing these registers them; without it the catalogue is empty.
-import { normaliseContent } from '@/teacher/latex';
+import { toTypesettable } from '@/teacher/latex';
 import { BOTTOM, DERIVATION, FIGURE, toPx, type Pt } from './units';
 import { buildShape, type Shape } from './draw-shapes';
 
@@ -652,7 +652,7 @@ export class Scene {
   }
 
   private createMath(id: string, content: string, place: Placement): BoardObject {
-    const ts = typeset(stripMath(content), DEFAULT_EM);
+    const ts = typeset(toTypesettable(content), DEFAULT_EM);
     // Chalk, not type. MathJax has no handwritten font, so the letterforms are
     // bent and set slightly off-baseline instead. Costs ~0.1ms per line and
     // leaves one <path> per glyph, so the stroke-by-stroke write is untouched.
@@ -740,19 +740,6 @@ function inked(el: SVGGraphicsElement): boolean {
     if (o === '' || Number(o) > 0.02) return true;
   }
   return false;
-}
-
-/**
- * `write` content is prose with $latex$ spans. Runs through the normaliser
- * first, so the plain backslash-free notation the model is asked for becomes
- * LaTeX, and any JSON-mangled real LaTeX gets repaired. M0's fixture is all
- * maths, so the whole span is handed on.
- */
-function stripMath(content: string): string {
-  const normalised = normaliseContent(content).latex;
-  // [\s\S] rather than the /s flag: tsconfig targets ES2017.
-  const m = normalised.match(/^\s*\$([\s\S]*)\$\s*$/);
-  return m ? m[1] : normalised;
 }
 
 export type { Animation };
