@@ -106,6 +106,12 @@ export default function Session() {
    * Held until the utterance ends, because that is when it can be judged.
    */
   const bargeIn = useRef(false);
+  /**
+   * What the teacher has said this turn, each chunk tagged with the output
+   * sample it starts at — so a barge-in can be told where the student's ears
+   * actually stopped.
+   */
+  const spoken = useRef<{ text: string; atSamples: number }[]>([]);
   /** True between activityStart and activityEnd. */
   const streaming = useRef(false);
   const commitTimer = useRef(0);
@@ -317,49 +323,86 @@ export default function Session() {
       push('system', `backchannel (${reason}) — carried on`);
     };
 
+    /**
+     * The last words the student actually heard, quoted back.
+     *
+     * The server keeps whatever it SENT; the student heard whatever the
+     * speaker reached, and those differ by the 5–13s of queued audio this
+     * whole architecture is built around. So after a barge-in the model's
+     * context holds a completed turn covering the entire explanation, and
+     * telling it "you did not finish" contradicts the transcript sitting right
+     * next to it — it believes the transcript, and carries on.
+     *
+     * Quoting the real boundary is the one thing that does not contradict
+     * anything. Playback is held from the first moment the microphone hears
+     * the student, so `played` has already stopped at exactly the right place.
+     */
+    const heardSoFar = () => {
+      const upTo = io.clock.played;
+      // A chunk counts as heard only once the NEXT one has also begun before
+      // the boundary — otherwise the speaker was still inside it and the
+      // student got part of those words, not all of them. Quoting slightly
+      // less than they heard costs nothing; quoting more is the whole bug.
+      const heard = spoken.current
+        .filter((_, i) => {
+          const next = spoken.current[i + 1];
+          return next ? next.atSamples <= upTo : false;
+        })
+        .map((c) => c.text)
+        .join('');
+      const unheard = spoken.current.some((c) => c.atSamples >= upTo);
+      // Cut at a word boundary and keep the tail: never quote half a word, and
+      // never claim more than was played.
+      const tail = heard.trimEnd().split(/\s+/).slice(-12).join(' ');
+      return { tail, unheard };
+    };
+
     /** The student really has taken the turn. Stop, and say what was heard. */
     const takeTheTurn = (reason: string) => {
       bargeIn.current = false;
       heldRef.current = false;
+      const { tail, unheard } = heardSoFar();
       // COMMIT: what was never heard is never drawn.
       const dropped = sched.dropUnheard();
       io.flush();
-      for (const d of dropped) {
+      dropped.forEach((d, i) => {
         // Tell the model the chalk never moved. Otherwise it believes it drew
-        // these and will refer back to things that are not there.
+        // these and will refer back to things that are not there. The board
+        // summary rides on the FIRST one only — several copies of it is a lot
+        // of tokens at the exact moment the student is waiting to be answered.
         sessRef.current?.sendToolResponse(
           d.callId,
           d.name,
-          { ok: false, error: 'not drawn — the student interrupted before you said this', board: boardSummary(scene) },
+          {
+            ok: false,
+            error: 'not drawn — the student interrupted before you said this',
+            ...(i === 0 ? { board: boardSummary(scene) } : {}),
+          },
           false,
         );
-      }
+      });
       /**
-       * Tell the model, in words, that it was cut off.
-       *
-       * Tool responses only say which chalk failed to land. They never say
-       * "you did not finish your sentence", so without this the model believes
-       * it spoke its whole turn and will never acknowledge the interruption or
-       * go back to the half-written line. `sendContext` (turnComplete:false)
-       * adds it without demanding a reply.
+       * One correction, sent as one message, immediately before the student's
+       * turn is handed over — see the call site. Tool responses only say which
+       * chalk failed to land; nothing else tells the model where its own voice
+       * actually stopped.
        */
       if (INJECT_INTERRUPT_CONTEXT) {
         const cut = cutRef.current;
         const lines = [
-          'SYSTEM: the student interrupted you. You did NOT finish your sentence,',
-          'and they did not hear the end of it.',
+          tail
+            ? `SYSTEM: the student cut in. They heard you only as far as "...${tail}"${
+                unheard ? ' and nothing after that' : ''
+              } — the rest of that turn never reached them, so do not refer to it or assume they know it.`
+            : 'SYSTEM: the student cut in before they heard any of that turn.',
           cut ? `On the board, "${cut.id}" is only half-written.` : null,
-          dropped.length
-            ? `Never drawn: ${dropped.map((d) => d.name).join(', ')}. Do not refer to them.`
-            : null,
-          'Answer what they just said, and only that. Do not restart, do not',
-          'greet, do not apologise, and do not carry on with what you were',
-          'saying unless they asked you to.',
+          dropped.length ? `Never drawn: ${dropped.map((d) => d.name).join(', ')}.` : null,
+          'Answer what they just said. Do not restart, greet or apologise.',
         ].filter(Boolean);
         sessRef.current?.sendContext(lines.join(' '));
       }
       cutRef.current = null;
-      push('system', `barge-in (${reason}) — teacher stopped`);
+      push('system', `barge-in (${reason}) — heard up to "…${tail.slice(-40)}"`);
       if (dropped.length) push('system', `dropped ${dropped.length} unheard op(s)`);
     };
 
@@ -433,11 +476,15 @@ export default function Session() {
           awaitingResume.current = 0;
           io.push(pcm);
         },
-        turnStart: () => sched.markTurnStart(io.clock.played),
+        turnStart: () => {
+          spoken.current = [];
+          sched.markTurnStart(io.clock.played);
+        },
         turnEnd: () => {
           speakingRef.current = false;
         },
         transcript: (c) => {
+          if (c.role === 'model') spoken.current.push({ text: c.text, atSamples: c.atSamples });
           if (c.role === 'user') lastHeard.current += ` ${c.text}`;
           push(c.role === 'model' ? 'teacher' : 'student', c.text);
         },
@@ -584,6 +631,16 @@ export default function Session() {
         v.speaking = false;
         window.clearTimeout(commitTimer.current);
         const committed = streaming.current;
+        // Settle BEFORE handing the turn over. `sendClientContent` is ordered
+        // only against other `sendClientContent`, not against realtime input,
+        // so a correction sent after `activityEnd` races the student's own
+        // turn and may be read after the reply it was meant to shape.
+        //
+        // The utterance is over, so there is finally something to judge it on.
+        // A blip the server was never told about cannot have interrupted
+        // anything, so the queued sentence simply carries on.
+        if (committed || bargeIn.current) settleTurn();
+        else if (heldRef.current) carryOn('blip');
         if (committed) {
           streaming.current = false;
           session.activityEnd();
@@ -593,12 +650,6 @@ export default function Session() {
           // Never committed — a blip the server was never told about.
           push('system', 'blip ignored — teacher not interrupted');
         }
-        // The utterance is over, so now there is something to judge it on.
-        // Anything the server actually heard gets settled properly; a blip it
-        // was never told about cannot have interrupted anything, so the queued
-        // sentence simply carries on.
-        if (committed || bargeIn.current) settleTurn();
-        else if (heldRef.current) carryOn('blip');
       }
       if (streaming.current) session.sendAudio(pcm);
     };

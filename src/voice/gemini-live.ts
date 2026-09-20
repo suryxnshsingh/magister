@@ -147,6 +147,18 @@ export class GeminiLiveSession implements VoiceSession {
   private onMessage(m: LiveServerMessage) {
     const sc = m.serverContent;
 
+    /**
+     * Where this message's audio begins — captured BEFORE the loop below
+     * advances the counter.
+     *
+     * An output transcript describes the audio in the same message, but it is
+     * parsed after it, by which time `received` has already moved past the
+     * words it names. Stamping there would place every chunk later than it is
+     * and claim the student heard words they never did, which is the exact
+     * failure the position exists to prevent. Under-claim, always.
+     */
+    const startedAt = this.received;
+
     if (sc?.generationComplete) this.trace('generationComplete');
 
     if (sc?.modelTurn?.parts) {
@@ -170,6 +182,7 @@ export class GeminiLiveSession implements VoiceSession {
         text: sc.outputTranscription.text,
         role: 'model',
         at: performance.now(),
+        atSamples: startedAt,
       });
     }
     if (sc?.inputTranscription?.text) {
@@ -177,6 +190,7 @@ export class GeminiLiveSession implements VoiceSession {
         text: sc.inputTranscription.text,
         role: 'user',
         at: performance.now(),
+        atSamples: startedAt,
       });
     }
 

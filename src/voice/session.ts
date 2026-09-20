@@ -42,6 +42,12 @@ export interface TranscriptChunk {
   text: string;
   role: 'user' | 'model';
   at: number;
+  /**
+   * Output-sample position these words begin at, in the same space as
+   * `played` — so a turn can be cut at the point the speaker actually
+   * reached rather than at the point generation stopped.
+   */
+  atSamples: number;
 }
 
 export type SessionState =
