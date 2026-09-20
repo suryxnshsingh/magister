@@ -59,6 +59,12 @@ const COMMIT_SPEECH_MS = 260;
 /** Mic audio held back so the start of an utterance is never clipped. */
 const PREROLL_MS = 320;
 /**
+ * The same window while the teacher is talking. Shorter, because every frame
+ * of it also carries the teacher's own voice — but never zero, or a barge-in
+ * loses the word it opened with.
+ */
+const PREROLL_ECHO_MS = 180;
+/**
  * How much louder the student must be than the teacher to count as speech.
  *
  * Browser echo cancellation is not enough on open speakers: the teacher's own
@@ -579,14 +585,23 @@ export default function Session() {
         echo * ECHO_RATIO,
       );
 
-      // Hold recent audio so a committed utterance can replay its own opening.
-      // Anything captured while the teacher was audible is echo, not speech,
-      // and must never be replayed into the model.
-      if (echoRef.current > 0.02) preroll.current = [];
+      /**
+       * Hold recent audio so a committed utterance can replay its own opening.
+       *
+       * While the teacher is audible most of this is echo, so the window is
+       * kept SHORT rather than emptied. Emptying it was worse than the echo it
+       * avoided: a barge-in is by definition speech over the teacher, so the
+       * buffer was always empty exactly when it mattered, and the utterance
+       * committed 260ms late — mid-word. That is how "ye theek banaya hai
+       * mera?" reaches the model as "ki sahi banaya hai mera", and a
+       * decapitated sentence is also how it ends up guessing which language it
+       * is being spoken to in.
+       */
       if (!streaming.current) {
         preroll.current.push(pcm);
-        const maxChunks = Math.ceil((PREROLL_MS / 1000) * 16000 / 128);
-        if (preroll.current.length > maxChunks) preroll.current.shift();
+        const window = echoRef.current > 0.02 ? PREROLL_ECHO_MS : PREROLL_MS;
+        const maxChunks = Math.ceil((window / 1000) * 16000 / 128);
+        while (preroll.current.length > maxChunks) preroll.current.shift();
       }
 
       if (peak > thr) {
