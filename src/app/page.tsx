@@ -101,6 +101,11 @@ export default function Session() {
   const lastHeard = useRef('');
   /** Recent mic chunks, replayed when an utterance commits. */
   const preroll = useRef<Int16Array[]>([]);
+  /**
+   * The server announced an interruption while the student was still speaking.
+   * Held until the utterance ends, because that is when it can be judged.
+   */
+  const bargeIn = useRef(false);
   /** True between activityStart and activityEnd. */
   const streaming = useRef(false);
   const commitTimer = useRef(0);
@@ -297,6 +302,99 @@ export default function Session() {
     });
     schedRef.current = sched;
 
+    /**
+     * Let the queued sentence carry on — the student was only nodding.
+     *
+     * Generation runs seconds ahead of playback, so what is still queued is the
+     * REST OF THE SENTENCE the model already produced. Resuming is the perfect
+     * continuation, with nothing to repair.
+     */
+    const carryOn = (reason: string) => {
+      bargeIn.current = false;
+      heldRef.current = false;
+      io.resume();
+      scene.clock.start();
+      push('system', `backchannel (${reason}) — carried on`);
+    };
+
+    /** The student really has taken the turn. Stop, and say what was heard. */
+    const takeTheTurn = (reason: string) => {
+      bargeIn.current = false;
+      heldRef.current = false;
+      // COMMIT: what was never heard is never drawn.
+      const dropped = sched.dropUnheard();
+      io.flush();
+      for (const d of dropped) {
+        // Tell the model the chalk never moved. Otherwise it believes it drew
+        // these and will refer back to things that are not there.
+        sessRef.current?.sendToolResponse(
+          d.callId,
+          d.name,
+          { ok: false, error: 'not drawn — the student interrupted before you said this', board: boardSummary(scene) },
+          false,
+        );
+      }
+      /**
+       * Tell the model, in words, that it was cut off.
+       *
+       * Tool responses only say which chalk failed to land. They never say
+       * "you did not finish your sentence", so without this the model believes
+       * it spoke its whole turn and will never acknowledge the interruption or
+       * go back to the half-written line. `sendContext` (turnComplete:false)
+       * adds it without demanding a reply.
+       */
+      if (INJECT_INTERRUPT_CONTEXT) {
+        const cut = cutRef.current;
+        const lines = [
+          'SYSTEM: the student interrupted you. You did NOT finish your sentence,',
+          'and they did not hear the end of it.',
+          cut ? `On the board, "${cut.id}" is only half-written.` : null,
+          dropped.length
+            ? `Never drawn: ${dropped.map((d) => d.name).join(', ')}. Do not refer to them.`
+            : null,
+          'Answer what they just said, and only that. Do not restart, do not',
+          'greet, do not apologise, and do not carry on with what you were',
+          'saying unless they asked you to.',
+        ].filter(Boolean);
+        sessRef.current?.sendContext(lines.join(' '));
+      }
+      cutRef.current = null;
+      push('system', `barge-in (${reason}) — teacher stopped`);
+      if (dropped.length) push('system', `dropped ${dropped.length} unheard op(s)`);
+    };
+
+    /**
+     * Decide what the student's utterance WAS — once it is over.
+     *
+     * This is the whole of the fix for a teacher that stops and then carries
+     * on regardless. The decision used to be taken the instant the server
+     * announced an interruption, which is roughly a quarter of a second into
+     * the student's first word: too short to be anything but a nod by the
+     * duration rule, and with the transcript not yet arrived. So a real
+     * question was read as "haan", the queue resumed, and the teacher went
+     * back to the sentence the student had just cut into.
+     *
+     * Both pieces of evidence — how long they spoke, and what they said —
+     * only exist once they stop. So that is when this runs.
+     */
+    const settleTurn = () => {
+      // The teacher was not talking, so nothing was interrupted: this is an
+      // ordinary turn and must not be reported to the model as a barge-in.
+      if (!heldRef.current) {
+        bargeIn.current = false;
+        return;
+      }
+      const v = vad.current;
+      const verdict = classifyInterruption(
+        Math.max(0, v.lastVoice - v.startedAt),
+        lastHeard.current,
+      );
+      // Nothing measurable was said: never throw a turn away on that.
+      if (verdict.spurious) carryOn('nothing heard');
+      else if (verdict.isBackchannel) carryOn(verdict.reason);
+      else takeTheTurn(verdict.reason);
+    };
+
     const rec = new SessionRecorder();
     rec.start();
     recRef.current = rec;
@@ -345,89 +443,33 @@ export default function Session() {
         },
         interrupted: () => {
           /**
-           * Not every sound is an interruption.
+           * The server has stopped generating. What it does NOT tell us is
+           * whether the student was asking something or just agreeing — and
+           * this arrives about a quarter of a second into their first word,
+           * long before either answer exists.
            *
-           * "haan", "hmm", "accha" is a student nodding out loud, and stopping
-           * the teacher for it is worse than not stopping at all. The queued
-           * audio is the saving grace: because generation runs seconds ahead of
-           * playback, simply resuming plays the REST OF THE SENTENCE the model
-           * already produced — the perfect continuation, with nothing to repair
-           * and no instruction needed.
+           * So nothing is decided here. The voice is already held from the
+           * first moment the microphone heard them, so the student hears the
+           * teacher stop either way; all that is deferred is whether the
+           * queued sentence is thrown away or resumed, and that is settled
+           * when they stop talking.
            */
           const v = vad.current;
-          // Count speech that has JUST ended too: the server's interrupt
-          // usually lands a beat after the student stopped.
           const recent = performance.now() - v.lastVoice < 1500;
-          const spokenMs = v.speaking
-            ? performance.now() - v.startedAt
-            : recent
-              ? v.lastVoice - v.startedAt
-              : 0;
-          const verdict = classifyInterruption(spokenMs, lastHeard.current);
-
-          if (verdict.spurious) {
-            // The server heard something this microphone did not. Flushing here
+          if (!v.speaking && !recent) {
+            // The server heard something this microphone did not. Flushing
             // would bin the 5–13s of queued speech and the student would hear
-            // almost nothing — which is exactly what "can't hear the teacher"
-            // looks like. Keep playing.
+            // almost nothing — which is what "can't hear the teacher" looks
+            // like. Keep playing.
             push('system', 'ignored a server interrupt — no local speech');
             return;
           }
-
-          if (verdict.isBackchannel) {
-            heldRef.current = false;
-            io.resume();
-            scene.clock.start();
-            push('system', `backchannel (${verdict.reason}) — carried on`);
+          if (v.speaking) {
+            bargeIn.current = true;
             return;
           }
-
-          // COMMIT: what was never heard is never drawn.
-          const dropped = sched.dropUnheard();
-          io.flush();
-          heldRef.current = false;
-          for (const d of dropped) {
-            // Tell the model the chalk never moved. Otherwise it believes it
-            // drew these and will refer back to things that are not there.
-            session.sendToolResponse(
-              d.callId,
-              d.name,
-              { ok: false, error: 'not drawn — the student interrupted before you said this', board: boardSummary(scene) },
-              false,
-            );
-          }
-
-          /**
-           * Tell the model, in words, that it was cut off.
-           *
-           * Tool responses only say which chalk failed to land. They never say
-           * "you did not finish your sentence", so without this the model
-           * believes it spoke its whole turn and will never acknowledge the
-           * interruption or go back to the half-written line. This is the one
-           * carrier for that, and `sendContext` (turnComplete:false) adds it to
-           * context without demanding a reply.
-           *
-           * There is an unresolved report that turnComplete:false can wedge
-           * subsequent audio input, so it is behind a flag and logged: if the
-           * teacher goes permanently silent after a barge-in, set this false.
-           */
-          if (INJECT_INTERRUPT_CONTEXT) {
-            const cut = cutRef.current;
-            const lines = [
-              'SYSTEM: the student interrupted you. You did NOT finish your sentence.',
-              cut
-                ? `On the board, "${cut.id}" is only half-written. Finish it when you return to it.`
-                : null,
-              dropped.length
-                ? `Never drawn: ${dropped.map((d) => d.name).join(', ')}. Do not refer to them.`
-                : null,
-              'Answer what they asked first. Do not restart your explanation from the beginning.',
-            ].filter(Boolean);
-            session.sendContext(lines.join(' '));
-            push('system', 'told model it was cut off');
-          }
-          cutRef.current = null;
-          if (dropped.length) push('system', `dropped ${dropped.length} unheard op(s)`);
+          // They have already stopped, so it can be settled now.
+          settleTurn();
         },
         toolCall: (call: ToolCall) => {
           // calc is BLOCKING: generation has stopped waiting for it, so it
@@ -541,7 +583,8 @@ export default function Session() {
       } else if (v.speaking && now - v.lastVoice > VAD_HANG_MS) {
         v.speaking = false;
         window.clearTimeout(commitTimer.current);
-        if (streaming.current) {
+        const committed = streaming.current;
+        if (committed) {
           streaming.current = false;
           session.activityEnd();
           // Handed over; now we are waiting on the teacher.
@@ -550,12 +593,12 @@ export default function Session() {
           // Never committed — a blip the server was never told about.
           push('system', 'blip ignored — teacher not interrupted');
         }
-        // RESUME: a cough, not an interruption. Nothing was lost.
-        if (heldRef.current) {
-          heldRef.current = false;
-          io.resume();
-          scene.clock.start();
-        }
+        // The utterance is over, so now there is something to judge it on.
+        // Anything the server actually heard gets settled properly; a blip it
+        // was never told about cannot have interrupted anything, so the queued
+        // sentence simply carries on.
+        if (committed || bargeIn.current) settleTurn();
+        else if (heldRef.current) carryOn('blip');
       }
       if (streaming.current) session.sendAudio(pcm);
     };

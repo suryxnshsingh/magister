@@ -52,9 +52,14 @@ export interface BackchannelCheck {
 }
 
 /**
- * `transcript` is the student's speech if it has arrived; it usually has not,
- * because transcription lags the audio. Duration alone carries the decision in
- * that case.
+ * Called once the utterance is OVER, which is the only moment both signals
+ * exist: the full duration, and the transcript if it has arrived.
+ *
+ * It used to be called the instant the server announced an interruption —
+ * about a quarter of a second into the student's first word. At that point the
+ * duration is always under {@link BACKCHANNEL_MAX_MS} and the transcript is
+ * always empty, so every barge-in came back "backchannel" and the teacher
+ * resumed the sentence the student had just cut into.
  */
 export function classifyInterruption(
   durationMs: number,
