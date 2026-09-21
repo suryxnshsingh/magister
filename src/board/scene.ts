@@ -84,6 +84,8 @@ export class Scene {
   readonly figures = new Map<string, SceneFigure>();
   /** Freehand primitives, addressable by bare id like everything else. */
   readonly drawings = new Map<string, SVGGElement>();
+  /** Where each drawing started and ended, for `id.start` / `id.end`. */
+  private ends = new Map<string, { start: Pt; end: Pt | null }>();
   /** Annotation marks, by op id, with what each one was drawn around. */
   readonly marks = new Map<string, { el: SVGGElement; target: string }>();
   /**
@@ -254,6 +256,7 @@ export class Scene {
     });
     this.layers.figures.appendChild(built.group);
     this.drawings.set(op.id, built.group);
+    this.ends.set(op.id, { start: a, end: b });
 
     const out: Animation[] = [];
     if (built.paths.length) out.push(createDraw(op.id, built.paths, now, 520));
@@ -275,23 +278,51 @@ export class Scene {
     const box = this.boxOf(op.target);
     if (!box) return [];
     const colour = op.colour ? asInk(op.colour) : 'yellow';
-    const w = Math.max(40, op.text.length * 15);
+    // Measured: the label face sets about 10.5px a character at this size.
+    const w = Math.max(40, op.text.length * 11);
+    const h = 34;
     const GAP = 70;
-    let at: Pt;
-    let tail: Pt;
-    let tip: Pt;
-    if (box.x + box.w + GAP + w < CANVAS_W - 20) {
-      at = { x: box.x + box.w + GAP + w / 2, y: box.y - 14 };
-      tail = { x: at.x - w / 2 - 6, y: at.y + 10 };
-      tip = { x: box.x + box.w + 8, y: box.y + box.h / 2 };
-    } else if (box.x - GAP - w > 20) {
-      at = { x: box.x - GAP - w / 2, y: box.y - 14 };
-      tail = { x: at.x + w / 2 + 6, y: at.y + 10 };
-      tip = { x: box.x - 8, y: box.y + box.h / 2 };
-    } else {
-      at = { x: box.x + box.w / 2, y: box.y + box.h + 64 };
-      tail = { x: at.x, y: at.y - 26 };
-      tip = { x: at.x, y: box.y + box.h + 8 };
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+
+    // Everything else already on the board, which a note must not sit on.
+    const taken = [...this.objects.keys(), ...this.drawings.keys(), ...this.figures.keys()]
+      .filter((id) => id !== baseId(op.target) && !this.erased.has(id))
+      .map((id) => this.boxOf(id))
+      .filter((b): b is NonNullable<typeof b> => b !== null);
+    const onBoard = (x: number, y: number) => x - w / 2 > 10 && x + w / 2 < CANVAS_W - 10 && y - h / 2 > 10;
+    /** How much of the board's contents a note here would sit on. */
+    const overlap = (x: number, y: number) =>
+      taken.reduce((sum, b) => {
+        const ox = Math.min(x + w / 2, b.x + b.w + 8) - Math.max(x - w / 2, b.x - 8);
+        const oy = Math.min(y + h / 2, b.y + b.h + 8) - Math.max(y - h / 2, b.y - 8);
+        return sum + (ox > 0 && oy > 0 ? ox * oy : 0);
+      }, 0);
+
+    // Right, left, above, below — the first spot that covers nothing, else
+    // whichever on the board covers least.
+    const spots = [
+      { at: { x: box.x + box.w + GAP + w / 2, y: box.y - 14 }, tail: (p: Pt) => ({ x: p.x - w / 2 - 6, y: p.y + 10 }), edge: { x: box.x + box.w + 8, y: cy } },
+      { at: { x: box.x - GAP - w / 2, y: box.y - 14 }, tail: (p: Pt) => ({ x: p.x + w / 2 + 6, y: p.y + 10 }), edge: { x: box.x - 8, y: cy } },
+      { at: { x: cx, y: box.y - 64 }, tail: (p: Pt) => ({ x: p.x, y: p.y + h / 2 + 4 }), edge: { x: cx, y: box.y - 8 } },
+      { at: { x: cx, y: box.y + box.h + 64 }, tail: (p: Pt) => ({ x: p.x, y: p.y - h / 2 - 6 }), edge: { x: cx, y: box.y + box.h + 8 } },
+    ];
+    const fits = spots.filter((s) => onBoard(s.at.x, s.at.y));
+    const spot =
+      fits.find((s) => overlap(s.at.x, s.at.y) === 0) ??
+      [...fits].sort((p, q) => overlap(p.at.x, p.at.y) - overlap(q.at.x, q.at.y))[0] ??
+      spots[0];
+    const at = spot.at;
+    const tail = spot.tail(at);
+    // A line of working is pointed at from outside its edge. A drawn thing —
+    // an arrow, a spring — at its middle, which is on the ink; the edge of its
+    // bounding box is often empty board.
+    let tip = spot.edge;
+    if (!this.objects.has(baseId(op.target))) {
+      const dx = tail.x - cx;
+      const dy = tail.y - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      tip = { x: cx + (dx / d) * 12, y: cy + (dy / d) * 12 };
     }
     const group = document.createElementNS(SVG_NS, 'g');
     group.setAttribute('data-draw', op.id);
@@ -563,6 +594,15 @@ export class Scene {
     }
 
     const dot = ref.lastIndexOf('.');
+    // The two ends of something drawn between two points — a wire, a
+    // resistor, a ray — so the next piece starts where the last one stopped:
+    // "R1.end". `.from` and `.to` are the words models reach for first.
+    const end = dot > 0 ? ref.slice(dot + 1).toLowerCase() : '';
+    if (end === 'start' || end === 'from' || end === 'end' || end === 'to') {
+      const ends = this.ends.get(ref.slice(0, dot));
+      const pt = end === 'start' || end === 'from' ? ends?.start : ends?.end;
+      if (pt) return { pt, clamped: false };
+    }
     const side = dot > 0 ? SIDES[ref.slice(dot + 1).toLowerCase()] : undefined;
     if (side) {
       // Tried after the figure-part lookup inside boxOf, so a part genuinely
@@ -618,6 +658,7 @@ export class Scene {
     this.liveWrites.clear();
     this.liveTaps = [];
     this.drawings.clear();
+    this.ends.clear();
     this.figures.clear();
     this.marks.clear();
     this.erased.clear();

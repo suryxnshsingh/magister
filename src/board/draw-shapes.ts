@@ -215,13 +215,37 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
     for (const d of ds) for (const piece of roughen(d, roughness)) path(piece, width);
   };
 
+  /**
+   * A shape's own label. An arrow carries its name — N, mg, f — and the model
+   * sends it that way, as `text` on the arrow; it used to be dropped, which
+   * left every force on the board unlabelled. Past the tip for anything with
+   * a head, beside the middle for anything without.
+   */
+  const named = (from: Pt, to: Pt, atTip: boolean) => {
+    if (!spec.text) return;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    if (atTip) {
+      words({ x: to.x + (dx / len) * 26 + (dy / len) * 10, y: to.y + (dy / len) * 26 - (dx / len) * 10 }, spec.text);
+    } else {
+      words({ x: (from.x + to.x) / 2 + (dy / len) * 28, y: (from.y + to.y) / 2 - (dx / len) * 28 }, spec.text);
+    }
+  };
+
   switch (spec.shape) {
     case 'curve':
-      if (b) chalk([curveD(a, b, c)], 0.6);
+      if (b) {
+        chalk([curveD(a, b, c)], 0.6);
+        named(a, c ?? b, false);
+      }
       break;
 
     case 'curvearrow':
-      if (b) chalk([curveArrowD(a, b, c)], 0.5, 3.5);
+      if (b) {
+        chalk([curveArrowD(a, b, c)], 0.5, 3.5);
+        named(c ?? a, b, true);
+      }
       break;
 
     case 'turn':
@@ -230,15 +254,24 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
       break;
 
     case 'wave':
-      if (b) chalk([waveD(a, b, spec.n)], 0.3);
+      if (b) {
+        chalk([waveD(a, b, spec.n)], 0.3);
+        named(a, b, false);
+      }
       break;
 
     case 'spring':
-      if (b) chalk([springD(a, b, spec.n)], 0.3);
+      if (b) {
+        chalk([springD(a, b, spec.n)], 0.3);
+        named(a, b, false);
+      }
       break;
 
     case 'field':
-      if (b) chalk(fieldD(a, b, spec.n), 0.5, 3);
+      if (b) {
+        chalk(fieldD(a, b, spec.n), 0.5, 3);
+        named(a, b, true);
+      }
       break;
 
     case 'dimension':
@@ -299,16 +332,25 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
       break;
 
     case 'arrow':
-      if (b) for (const d of roughen(arrowD(a, b), 0.6)) path(d, 4);
+      if (b) {
+        for (const d of roughen(arrowD(a, b), 0.6)) path(d, 4);
+        named(a, b, true);
+      }
       break;
 
     case 'line':
-      if (b) for (const d of roughen(`M${a.x},${a.y}L${b.x},${b.y}`, 0.7)) path(d, 3.5);
+      if (b) {
+        for (const d of roughen(`M${a.x},${a.y}L${b.x},${b.y}`, 0.7)) path(d, 3.5);
+        named(a, b, false);
+      }
       break;
 
     case 'dashed':
       // Real segments: stroke-dasharray is overwritten by the draw animation.
-      if (b) for (const d of dashedD(a, b)) path(d, 2.5);
+      if (b) {
+        for (const d of dashedD(a, b)) path(d, 2.5);
+        named(a, b, false);
+      }
       break;
 
     case 'circle': {

@@ -34,9 +34,10 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'fractions as frac(numerator, denominator), powers as u^2, subscripts as u_x, ' +
       'multiplication as *. Vectors as vec(F), unit vectors as hat(n), ' +
       'derivatives as dv(x,t) and pdv(u,x) — use them, a vector should look ' +
-      'like a vector. Wrap ONE quantity in accent(...) to give it the accent ' +
-      'colour, and use colour=accent on that same quantity when you draw it, so ' +
-      'the v in the equation and the v on the diagram are visibly one thing. ' +
+      'like a vector. Colour a quantity by wrapping it in its chalk: yellow(...), ' +
+      'blue(...), red(...), green(...), orange(...), purple(...) — the SAME colour ' +
+      'you draw that quantity in, so the N in "$blue(N) = red(mg) cos(theta)$" and ' +
+      'the blue N arrow on the diagram are visibly one thing. ' +
       'Example: "$u_x = u cos(theta) = 17.3 m/s$". ' +
       'Example: "$R = frac(u^2 sin(2 theta), g)$". ' +
       'Give each line a short meaningful id you can refer to later, like "ux" or "range".',
@@ -76,8 +77,13 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       style: {
         type: 'string',
         description:
-          'circle | underline | strike | box | cancel. Use cancel on a term ' +
-          'that cancels out, at the moment you say it cancels.',
+          'circle | underline | strike | box | cancel | highlight. Use cancel on a ' +
+          'term that cancels out, at the moment you say it cancels; highlight to ' +
+          'make one term glow in colour while the rest stays chalk.',
+      },
+      colour: {
+        type: 'string',
+        description: 'Chalk colour — the colour of the thing being marked, if it has one.',
       },
     },
     required: ['target', 'style'],
@@ -89,22 +95,35 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'the next shape — a diagram is built up piece by piece as you describe ' +
       'it, which is how a teacher actually draws. Every shape you draw gets an ' +
       'id, and you anchor later shapes to earlier ones by that id instead of ' +
-      'working out positions. Use this for anything there is no prepared ' +
-      'figure for: free-body diagrams, circuits, inclines, pulleys, lenses, ' +
-      'waves, fields, collisions, anything you can sketch. If a prepared ' +
-      'figure fits (see scene), prefer it — it knows its own physics. Never ' +
-      'announce that you are drawing; just keep talking.',
+      'working out positions. You can draw anything with these — free-body ' +
+      'diagrams, inclines, pulleys, springs, circuits, waves, fields, lenses, ' +
+      'collisions. If a prepared figure fits (see scene), prefer it — it knows ' +
+      'its own physics. Never announce that you are drawing; just keep talking. ' +
+      'SHAPES — lines: arrow, line, dashed (construction), curve and curvearrow ' +
+      '(from→to, bending through to2: a trajectory, a field line, a bent ray), ' +
+      'link (joins a symbol in an equation to the thing it means). ' +
+      'Things: circle (to is a point on its rim), box, dot, triangle (from, to, ' +
+      'to2 are its corners: an incline, a wedge, a prism), shade (hatches a ' +
+      'region — the box from→to, or the triangle with to2: the area under a graph). ' +
+      'Surfaces and measures: ground (a hatched floor, wall or ceiling; the ' +
+      'hatching is on the right of from→to, so draw a floor left to right), ' +
+      'dimension (a measured length from→to, text is its name: d, D, L), angle ' +
+      '(at from, between the arms to and to2, text is its name). ' +
+      'Motion and fields: turn (a curved arrow around from, reaching out to to: ' +
+      'torque, rotation; n=-1 for clockwise), wave (n cycles from→to), spring ' +
+      '(n coils from→to), field (n parallel arrows the length and direction of ' +
+      'from→to). Charges and circuits: charge (text + or -), and resistor, cell, ' +
+      'capacitor, bulb, switch, inductor, meter (text A, V or G) — each drawn ' +
+      'between from and to with wire to both ends, so chain them corner to corner ' +
+      'into a closed circuit; text labels one. Words: label (text at from).',
     parameters: {
       id: {
         type: 'string',
-        description: 'Short semantic name, e.g. "block", "N", "theta".',
+        description: 'Short semantic name, e.g. "block", "N", "theta", "R1".',
       },
       shape: {
         type: 'string',
-        description:
-          `One of: ${SHAPES.join(', ')}. "link" joins two things already on the ` +
-          'board — a symbol in an equation and the thing it means in the ' +
-          'diagram — so give it both ids.',
+        description: `One of: ${SHAPES.join(', ')}.`,
       },
       from: {
         type: 'string',
@@ -112,30 +131,42 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
           'Where it starts. "x,y" as two numbers from 0 to 1 inside the drawing ' +
           'area (0,0 bottom-left, 1,1 top-right) for the FIRST shape; after that ' +
           'name something already drawn. You can name a face of it — ' +
-          '"block.top", also bottom, left, right, centre — or a fraction along a ' +
-          'line, like "incline@0.6". Faces are what a force diagram needs: the ' +
-          'normal pushes off the top, friction runs along the base, weight hangs ' +
-          'from the centre.',
+          '"block.top", also bottom, left, right, centre — a fraction along a ' +
+          'line, like "incline@0.6", or either end of anything drawn between two ' +
+          'points, "R1.start" and "R1.end". Faces are what a force diagram needs: ' +
+          'the normal pushes off the top, friction runs along the base, weight ' +
+          'hangs from the centre. Ends are what a circuit needs: each component ' +
+          'starts at the end of the last, from="R1.end".',
       },
       to: {
         type: 'string',
         description:
           'Where it ends, same format as from. For a circle this is a point on ' +
-          'its rim. For a dot or label, leave it out.',
+          'its rim. For a dot, label or charge, leave it out.',
       },
       to2: {
         type: 'string',
-        description: 'Only for shape "angle": the second arm of the angle.',
+        description:
+          'A third point: the second arm of an angle, the third corner of a ' +
+          'triangle or shade, the point a curve bends through.',
       },
       text: {
         type: 'string',
-        description: 'The words, for shape "label", or the angle name for "angle".',
+        description:
+          'The words: a label, an angle or dimension name, a meter letter, a ' +
+          'charge sign, a component name like R_1. Plain notation: theta, F_N.',
       },
       colour: {
         type: 'string',
         description:
-          'chalk (default), dim for construction lines, accent to make one ' +
-          'thing stand out.',
+          'chalk (default), yellow, blue, red, green, orange, purple, or dim for ' +
+          'construction lines. Colour by what the thing IS — see the colour rules.',
+      },
+      n: {
+        type: 'string',
+        description:
+          'A count, where a shape has one: coils in a spring, cycles in a wave, ' +
+          'arrows in a field. For turn, -1 means clockwise.',
       },
     },
     required: ['id', 'shape', 'from'],
@@ -178,6 +209,33 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       step: { type: 'string', description: 'Step name.' },
     },
     required: ['id', 'step'],
+  },
+  {
+    name: 'note',
+    description:
+      'Write a short margin note beside something on the board, with an arrow ' +
+      'to it — the remark a teacher scribbles next to a line or a diagram: ' +
+      '"constant!", "= 0 at the top", "always perpendicular", "why?". A few ' +
+      'words, never a sentence. It goes where there is room and can be erased ' +
+      'by its id.',
+    parameters: {
+      id: { type: 'string', description: 'Short id for the note, e.g. "n_const".' },
+      target: { type: 'string', description: 'What it is about — same form as point.' },
+      text: { type: 'string', description: 'The note: two to five words, plain notation.' },
+      colour: { type: 'string', description: 'Chalk colour; yellow if left out.' },
+    },
+    required: ['target', 'text'],
+  },
+  {
+    name: 'resume',
+    description:
+      'Finish writing a line the student cut into — the board summary marks it ' +
+      'PARTIAL. It continues from exactly where the chalk stopped. Use it when ' +
+      'you come back to that line, instead of writing it again underneath.',
+    parameters: {
+      id: { type: 'string', description: 'The id of the half-written line.' },
+    },
+    required: ['id'],
   },
   {
     name: 'erase',
@@ -270,7 +328,7 @@ While saying exactly that you would silently write the current relation, underli
 - Every turn where you explain something must use the board at least once, while you are still talking. Never end a turn in order to use the board, and never use the board in a turn where you say nothing.
 - Point or mark at least as often as you write — on a real board pointing is about half of everything the teacher does. A teacher who writes but never points is a narrator.
 - Point hardest at the SEAM: the symbol in the equation and the thing it means in the picture. That is where a student loses the thread, and \`draw\` with shape=link draws the join and leaves it there.
-- The accent colour belongs to ONE quantity for a whole problem — if v is accented in the equation, accent the velocity arrow too. It marks what a thing IS, not where to look. Never let colour be the only thing carrying a meaning: name it or point at it as well, because the exam paper the student sits is black and white.
+- Colour every diagram, by the colour rules below.
 - Refer back to what is already on the board by its id, constantly.
 - Give every line a short semantic id you will remember, drawn from the physics: "vi", "emf", "focal", "Ktotal".
 
@@ -280,6 +338,13 @@ Physics is not equations with occasional pictures. If the thing you are explaini
 
 You are never stuck for a diagram. If a prepared figure fits, use \`scene\`; it knows its own physics. For everything else use \`draw\`, one shape at a time, building the picture up as you talk: a block, then the forces on it; a wire, then the cell, then the resistor; a surface, then the ray coming in. Anchor each new shape to something already drawn by its id, so you never have to think about positions.
 
+Your chalk box is a real one. An incline is a triangle on a hatched ground, with the angle marked. A spring-mass system is a wall, a spring and a box. A circuit is a cell, then a resistor, a bulb, a meter, a switch, each drawn from the end of the last until the loop closes. A wave is a wave; a uniform field is a field of parallel arrows; a torque is a turn; a separation is a dimension with its name on it; the area under a graph is shaded.
+
+Talk to the board the way a teacher does, not only on it:
+- A \`note\` beside a line or a part of the diagram is the remark you would scribble in the margin — "constant!", "= 0 at the top", "always perpendicular". Two to five words.
+- \`mark\` with style=highlight makes one term glow in its colour while you talk about it.
+- If the student cut you off mid-line, the board summary calls that line PARTIAL. When you come back to it, \`resume\` it — it finishes from where the chalk stopped — rather than writing it again.
+
 The board is not infinite, and you clear it yourself. When you finish one idea and move to a different one, erase what the new one does not need — \`erase\` with "board" for a clean surface, or with an id to take one line off. Keep anything you are still going to refer back to; wipe the rest. A teacher who never touches the duster ends up writing over their own working, and once the board is a mess the student stops reading it.
 
 A \`scene\` figure ARRIVES HALF-DRAWN. You get the bare setup — the surface, the axes, the ground — and every other part of it stays invisible until you call \`step\` for it. So step through them as your explanation reaches each one. A ray diagram with no rays, or a graph with nothing shaded, is a diagram you are talking about and the student cannot see.
@@ -287,6 +352,32 @@ A \`scene\` figure ARRIVES HALF-DRAWN. You get the bare setup — the surface, t
 Build a diagram up piece by piece rather than describing it and drawing it at the end. A student watching a free-body diagram appear force by force is learning where the forces come from; the same diagram arriving complete is just a picture.
 
 Never say you cannot draw something, and never apologise for the board.
+
+`;
+
+/**
+ * How colour is used on the board. Shared by both tracks: whoever holds the
+ * chalk, the same thing is the same colour.
+ *
+ * Roles, not a crayon box. Colour says what a thing IS — which force, which
+ * ray, the quantity being solved for — and stays with it across the equation
+ * and the diagram, so a student can match the two by eye. And it never
+ * carries a meaning alone, because the exam paper is black and white.
+ */
+export const PROMPT_COLOUR = `## Colour
+
+You have a box of coloured chalk: chalk (white), yellow, blue, red, green, orange, purple — and dim for construction. Use it on every diagram. A diagram in one colour leaves the student to do the sorting that colour does for free.
+
+Colour means what a thing IS, and a thing keeps its colour everywhere it appears — the arrow, its label, its term in the equation:
+- Forces, one colour each for the whole problem: weight red, normal reaction blue, friction orange, tension green, anything applied purple. Write "$blue(N) = red(mg) cos(theta)$" and draw the N arrow blue and the mg arrow red.
+- What the question asks for is yellow — in the working and on the diagram. Given values stay chalk.
+- Motion: velocity and acceleration each their own colour, distinct from the forces.
+- Light: the incident ray one colour, the reflected or refracted ray another; the normal dim.
+- Fields: electric purple, magnetic blue. Charges: positive red, negative blue.
+- Circuits: the component the question is about in colour, the rest in chalk.
+- Axes, normals, construction lines, dimensions: dim.
+
+Three or four colours on a diagram, not seven. And never let colour carry a meaning on its own: every arrow, ray and field you draw gets its label at its tip, in its colour — N, mg, f, T, v, E — the same symbol the equation uses. An unlabelled arrow is a guess the student has to make.
 
 `;
 
@@ -359,4 +450,4 @@ Never say or write a number you have not computed with calc. Trig is in DEGREES.
  * what was already written. If the model will not do these when asked
  * directly, no amount of scheduling on our side will rescue it.
  */
-export const TEACHER_PROMPT = PROMPT_PERSONA + PROMPT_BOARD + PROMPT_TEACHING;
+export const TEACHER_PROMPT = PROMPT_PERSONA + PROMPT_BOARD + PROMPT_COLOUR + PROMPT_TEACHING;

@@ -131,8 +131,16 @@ function plainToLatex(src: string): string {
   let s = src;
 
   // Innermost calls first, so a nested sin(...) is gone before frac sees it.
+  // Words inside maths: text(same in series). Set as words, spaces kept —
+  // otherwise it goes up as italic letters run together, "text(sameinseries)".
+  s = replaceCalls(s, 'text', ([a]) => `\\text{ ${(a ?? '').replace(/[{}\\]/g, '')} }`);
+
   for (const f of FUNCS) {
-    s = replaceCalls(s, f, ([a]) => `\\${f}{${plainToLatex(a ?? '')}}`);
+    // sin(2 theta) is written "sin 2θ", but sin(omega t + phi) must keep its
+    // brackets — without them it reads as (sin ωt) + φ, a different function.
+    s = replaceCalls(s, f, ([a]) =>
+      /[+\-−]/.test(a ?? '') ? `\\${f}\\left(${plainToLatex(a ?? '')}\\right)` : `\\${f}{${plainToLatex(a ?? '')}}`,
+    );
   }
   s = replaceCalls(s, 'sqrt', ([a]) => `\\sqrt{${plainToLatex(a ?? '')}}`);
 

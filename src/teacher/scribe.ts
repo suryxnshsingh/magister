@@ -20,9 +20,9 @@
  * afterwards is too late for either.
  */
 import type { ToolDeclaration } from '@/voice/session';
-import { PROMPT_PERSONA, PROMPT_TEACHING, TEACHER_TOOLS } from './tools';
+import { PROMPT_COLOUR, PROMPT_PERSONA, PROMPT_TEACHING, TEACHER_TOOLS } from './tools';
 
-const BOARD_TOOLS = new Set(['write', 'point', 'mark', 'draw', 'scene', 'step', 'erase']);
+const BOARD_TOOLS = new Set(['write', 'point', 'mark', 'note', 'draw', 'scene', 'step', 'resume', 'erase']);
 
 /** The board tools, each with the cue that places it on a word. */
 export const SCRIBE_TOOLS: ToolDeclaration[] = TEACHER_TOOLS.filter((t) => BOARD_TOOLS.has(t.name)).map(
@@ -83,12 +83,16 @@ export const SCRIBE_PROMPT = `You hold the chalk for a physics teacher. The teac
 ## How the board is used
 - Point or mark at least as often as you write. Pointing is half of what a teacher's hand does.
 - Point hardest at the SEAM between an equation and the picture — the symbol and the thing it means. draw with shape=link joins the two.
-- The accent colour belongs to ONE quantity for a whole problem — accent it in the equation and on the diagram alike.
+- Colour every diagram, by the colour rules below.
 - Build diagrams up piece by piece as they are described. A free-body diagram appears force by force.
 - A scene figure arrives half-drawn: its reveal steps are NOT on the board until you call step for each.
 - Erase at boundaries, not as you go. Keep what the teacher will refer back to.
+- Your chalk box is a real one: an incline is a triangle on a hatched ground with its angle marked; a spring-mass is a wall, a spring and a box; a circuit is a cell, then a resistor, a bulb, a meter, a switch, each from the end of the last until the loop closes. Use wave, field, turn, dimension and shade where the teacher describes those.
+- When the teacher makes a passing remark about something on the board — "ye constant hai", "top pe ye zero ho jaata hai" — put it up as a note beside that thing, two to five words.
+- When the teacher dwells on one term, highlight it (mark style=highlight) in its colour.
+- A line marked PARTIAL was cut off when the student interrupted. When the teacher comes back to it, resume it instead of writing it again.
 
-## Notation
+${PROMPT_COLOUR}## Notation
 Maths always goes inside $...$ in a write — "$v = omega r$", never bare "v = omega r", which goes up as words. Never use a backslash. Write theta, cos(theta), sin(2 theta), frac(a, b), u^2, u_x, vec(F), hat(n), dv(x,t). Numbers exactly as the teacher says them — never compute or invent one.
 `;
 

@@ -63,3 +63,16 @@ test('an equation can name its quantities in the same inks as the diagram', asyn
   assert.ok(measure(tex).glyphCount > 5);
   assert.equal(typesetProblem(tex), null, 'every ink typesets');
 });
+
+test('a function of a sum keeps its brackets', () => {
+  // "A sin ωt + φ" went up for sin(omega t + phi) — a different function.
+  const { latex } = normaliseMath('x = A sin(omega t + phi)');
+  assert.match(latex, /\\sin\\left\(/);
+  assert.match(normaliseMath('sin(2 theta)').latex, /\\sin\{?2\s*\\theta/);
+});
+
+test('words inside maths keep their spaces', () => {
+  const { latex } = normaliseMath('I = text(same in series)');
+  assert.match(latex, /\\text\{ same in series \}/);
+  assert.equal(typesetProblem(toTypesettable('$I = text(same in series)$')) ?? null, null);
+});
