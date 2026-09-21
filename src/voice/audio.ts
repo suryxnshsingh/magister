@@ -43,7 +43,23 @@ export class AudioIO {
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true,
+        /**
+         * OFF, deliberately.
+         *
+         * Automatic gain hunts for signal when the room is quiet — which is
+         * exactly the state this app is in whenever the teacher is the one
+         * talking. It ramps the microphone up until the residual echo that
+         * cancellation could not remove is loud enough to look like speech,
+         * and the teacher's own voice gets committed as the student's: the
+         * symptom is a Hinglish lesson sprouting "¿Qué?" every time the
+         * teacher pauses.
+         *
+         * It also breaks the only defence against that. The echo guard
+         * compares what the microphone hears against what the speakers are
+         * playing, and that comparison means nothing if the microphone's gain
+         * is being rescaled underneath it.
+         */
+        autoGainControl: false,
         channelCount: 1,
       },
     });

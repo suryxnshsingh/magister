@@ -61,25 +61,19 @@ const COMMIT_SPEECH_MS = 260;
 /** Mic audio held back so the start of an utterance is never clipped. */
 const PREROLL_MS = 320;
 /**
- * How much louder the student must be than the teacher to count as speech.
+ * How far above the LEARNED echo the student has to be.
  *
- * Browser echo cancellation is not enough on open speakers: the teacher's own
- * voice comes back through the microphone, the local VAD calls it speech, and
- * we interrupt the teacher mid-explanation. The transcript gives it away —
- * the teacher's Hinglish comes back as a "student" turn in another language.
+ * This used to be a fixed fraction of the speaker output, which is a guess
+ * about a room nobody can see: too low and the teacher's own voice commits as
+ * the student's, too high and a real barge-in is ignored. There is no single
+ * number that is right for both headphones and open speakers.
  *
- * Real barge-in is close-miked and loud; speaker bleed is not. Raising the bar
- * in proportion to what is currently coming out of the speakers separates the
- * two without needing headphones.
+ * So the echo is measured rather than assumed — see `echoFloor`. A headset
+ * drives it to the noise floor and barge-in stays easy; open speakers raise
+ * it and the student has to genuinely out-talk the room, which is the honest
+ * bar rather than an arbitrary one.
  */
-const ECHO_GUARD = 7;
-/**
- * The student must be at least this loud RELATIVE to what the speakers are
- * putting out. Scaling the threshold alone was not enough — bleed scales with
- * the teacher's own volume, so the comparison has to be against that volume
- * directly rather than against the room's noise floor.
- */
-const ECHO_RATIO = 0.85;
+const ECHO_MARGIN = 2.5;
 
 interface Line {
   role: 'teacher' | 'student' | 'system';
@@ -152,7 +146,14 @@ export default function Session() {
   const sessRef = useRef<VoiceSession | null>(null);
   const recRef = useRef<SessionRecorder | null>(null);
   const [lastSession, setLastSession] = useState<string | null>(null);
-  const vad = useRef({ speaking: false, lastVoice: 0, floor: 0.02, startedAt: 0 });
+  const vad = useRef({
+    speaking: false,
+    lastVoice: 0,
+    floor: 0.02,
+    startedAt: 0,
+    /** What the microphone hears while the teacher talks and nobody else does. */
+    echoFloor: 0,
+  });
   /** Most recent student transcript, for telling a nod from a question. */
   const lastHeard = useRef('');
   /** Recent mic chunks, replayed when an utterance commits. */
@@ -715,12 +716,36 @@ export default function Session() {
       // its own voice returning through the speakers reads as a barge-in.
       const echo = outLevelRef.current;
       echoRef.current = echo;
-      const guard = 1 + echo * ECHO_GUARD;
+      /**
+       * Learn what the teacher's voice comes back as.
+       *
+       * While the teacher is audible and nothing has yet been taken for
+       * speech, whatever the microphone hears IS the leftover echo — the part
+       * cancellation could not remove. Averaging it slowly gives a real
+       * measurement of this room and these speakers, which is the thing the
+       * threshold should be set against. It decays once the teacher stops, so
+       * a student who moves to headphones is not held to yesterday's bar.
+       */
+      if (echo > 0.02 && !v.speaking) {
+        v.echoFloor = v.echoFloor * 0.97 + peak * 0.03;
+      } else if (echo <= 0.02) {
+        v.echoFloor *= 0.999;
+      }
+      /**
+       * Two bars, and the higher one wins: the room's own noise, and the
+       * teacher's voice coming back through the speakers.
+       *
+       * There was a third — the noise floor multiplied by `1 + echo * 7` — and
+       * it was a stand-in for the echo from before anything measured it.
+       * Keeping it next to a real measurement counts the same thing twice and
+       * puts the bar near shouting: a student speaking normally over the
+       * teacher falls just under it and is never heard at all.
+       */
       const thr = Math.max(
         VAD_FLOOR_MIN,
-        v.floor * VAD_MULTIPLE * guard,
-        // Directly proportional to what is coming out of the speakers.
-        echo * ECHO_RATIO,
+        v.floor * VAD_MULTIPLE,
+        // Above the echo this room actually produces, not a guess at it.
+        v.echoFloor * ECHO_MARGIN,
       );
 
       /**
