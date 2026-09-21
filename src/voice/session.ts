@@ -161,6 +161,14 @@ export interface VoiceSession {
   /** Inject text without asking for a reply — board summaries, nudges. */
   sendContext(text: string): void;
   /**
+   * Inject a picture with a line of text, without asking for a reply — the
+   * board as the student sees it. Measured on gemini-3.8-live: read correctly
+   * line by line at the default resolution, and harmless mid-generation (the
+   * explanation it lands in runs its full length, uninterrupted). Never while
+   * the student's audio is streaming.
+   */
+  sendImageContext(text: string, image: { mimeType: string; data: string }): void;
+  /**
    * Force a turn. Unlike sendContext this DOES demand generation, so it is the
    * only way to restart a model that has gone quiet holding a blocking tool
    * result. Use sparingly: it interrupts if anything is still generating.

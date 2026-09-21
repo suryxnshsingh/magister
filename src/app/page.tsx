@@ -20,6 +20,7 @@ import { CANVAS_H, CANVAS_W } from '@/board/units';
 import type { Scene } from '@/board/scene';
 import { createPenElements, renderPen, type PenElements } from '@/board/pen-render';
 import { SessionRecorder } from '@/board/sessions';
+import { snapshotBoard, type Snapshot } from '@/board/snapshot';
 import { AudioIO, INPUT_RATE } from '@/voice/audio';
 import { OpScheduler } from '@/voice/scheduler';
 import type { SessionState, ToolCall, VoiceSession } from '@/voice/session';
@@ -46,6 +47,10 @@ const INJECT_INTERRUPT_CONTEXT = true;
  * a board call it stopped to wait on — may stay silent before it is nudged.
  */
 const STALL_MS = 3200;
+/** A fresh picture of the board is rendered this long after it last changed. */
+const SNAPSHOT_RENDER_MS = 800;
+/** …and handed to the teacher once the board has been still this long. */
+const SNAPSHOT_QUIET_MS = 3000;
 /**
  * Mic audio held back so the start of an utterance is never clipped: the whole
  * window the commit was judged on, and a little of the breath before it.
@@ -391,6 +396,65 @@ export default function Session() {
     /** Which board reply wakes a teacher that stopped to wait for it — see `voice/wake.ts`. */
     const wake = new Wakeup();
 
+    /**
+     * The teacher SEES the board — the picture the student is looking at, not
+     * a list of what it asked for. A figure clamped to fit, a label sitting
+     * on a ray, a line half-written when it was cut off: none of that reaches
+     * a list of ids, and all of it is in the picture. The manifest rides along
+     * so it can still name what it wants to point at.
+     *
+     * Rendered in the background shortly after every change (25ms, no
+     * network), and sent once the board has been still for a few seconds —
+     * a trailing debounce, so a flurry of strokes costs one picture. And sent
+     * on the spot the moment the student starts talking, before their audio,
+     * so their question arrives after the board it is about.
+     *
+     * Never while their audio is streaming: context injected into that was
+     * measured to come back as garbage. Anything that changed meanwhile goes
+     * the moment they finish.
+     */
+    const snap = {
+      version: 0,
+      rendered: 0,
+      sent: 0,
+      latest: null as Snapshot | null,
+      renderTimer: 0,
+      sendTimer: 0,
+    };
+    const renderBoard = async () => {
+      const svg = svgRef.current;
+      if (!svg || snap.rendered === snap.version) return;
+      const version = snap.version;
+      try {
+        const picture = await snapshotBoard(svg);
+        if (version > snap.rendered) {
+          snap.latest = picture;
+          snap.rendered = version;
+        }
+      } catch (e) {
+        push('system', `board snapshot failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+    const showBoard = () => {
+      if (streaming.current || !snap.latest || snap.sent >= snap.rendered) return;
+      sessRef.current?.sendImageContext(
+        `SYSTEM: the board right now, exactly as the student sees it. On it, by id:\n${boardSummary(scene)}\nNothing to reply to — carry on.`,
+        snap.latest,
+      );
+      if (!snap.sent) push('system', 'the teacher can see the board now');
+      snap.sent = snap.rendered;
+    };
+    const boardChanged = () => {
+      snap.version++;
+      window.clearTimeout(snap.renderTimer);
+      window.clearTimeout(snap.sendTimer);
+      snap.renderTimer = window.setTimeout(renderBoard, SNAPSHOT_RENDER_MS);
+      snap.sendTimer = window.setTimeout(async () => {
+        await renderBoard();
+        showBoard();
+      }, SNAPSHOT_QUIET_MS);
+    };
+
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
       for (const op of r.ops) {
@@ -399,6 +463,7 @@ export default function Session() {
         // rhythm the student heard rather than the socket's 5–13s lead.
         recRef.current?.add(op);
       }
+      if (r.ops.length) boardChanged();
       push('system', r.note);
       // The reply describes what actually happened, so it is sent now rather
       // than on arrival — and SILENT, unless the model ended its turn on this
@@ -844,6 +909,8 @@ export default function Session() {
                 recRef.current?.interrupt(cutRef.current.id, cutRef.current.at);
               }
               scene.clock.freeze();
+              // The pen stopped mid-stroke: that half-line is what they see.
+              boardChanged();
               if (onset) {
                 push(
                   'system',
@@ -856,6 +923,8 @@ export default function Session() {
           case 'commit':
             // Tell the server only now — see `voice/gate.ts` for what makes
             // this speech rather than a crackle.
+            // The board they are about to ask about, ahead of their words.
+            showBoard();
             streaming.current = true;
             session.activityStart();
             // The pre-roll already holds this block, so it is not sent twice.
@@ -886,6 +955,8 @@ export default function Session() {
              * that.
              */
             settleTurn(true, e);
+            // Whatever changed on the board while they were talking.
+            showBoard();
             break;
         }
       }
@@ -1066,12 +1137,13 @@ export default function Session() {
                 <feColorMatrix type="saturate" values="0" />
               </filter>
             </defs>
-            <rect width={CANVAS_W} height={CANVAS_H} fill="url(#vig)" />
-            <rect width={CANVAS_W} height={CANVAS_H} filter="url(#grain)" opacity="0.05" />
+            {/* data-snapshot="skip": surface and hand, not board — see board/snapshot.ts */}
+            <rect width={CANVAS_W} height={CANVAS_H} fill="url(#vig)" data-snapshot="skip" />
+            <rect width={CANVAS_W} height={CANVAS_H} filter="url(#grain)" opacity="0.05" data-snapshot="skip" />
             <g ref={figRef} />
             <g ref={inkRef} />
             <g ref={markRef} />
-            <g ref={penRef} />
+            <g ref={penRef} data-snapshot="skip" />
           </svg>
 
           {/*

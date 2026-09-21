@@ -305,6 +305,13 @@ export class GeminiLiveSession implements VoiceSession {
     });
   }
 
+  sendImageContext(text: string, image: { mimeType: string; data: string }) {
+    this.session?.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text }, { inlineData: image }] }],
+      turnComplete: false,
+    });
+  }
+
   /**
    * turnComplete:true "unconditionally interrupts generation" — which is
    * exactly right when generation has already stopped and we need it going
