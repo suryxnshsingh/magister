@@ -111,7 +111,8 @@ export interface DrawOp extends Common {
   /** Second arm, for an angle mark. */
   to2?: string;
   text?: string;
-  colour?: 'chalk' | 'dim' | 'accent';
+  /** An ink name — see `INKS`. */
+  colour?: string;
 }
 
 export interface EraseOp extends Common {

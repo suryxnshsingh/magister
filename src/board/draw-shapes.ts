@@ -22,7 +22,7 @@
  *    a sketch and a template cannot be told apart.
  */
 import { splitAll } from './chalk/subpaths';
-import { arcD, arrowD, CHALK, dashedD, DIM, SVG_NS, YELLOW } from './templates/primitives';
+import { arcD, arrowD, dashedD, inkOf, SVG_NS, type Ink } from './templates/primitives';
 import type { Pt } from './units';
 import rough from 'roughjs';
 
@@ -56,7 +56,7 @@ export interface ShapeSpec {
   to?: Pt | null;
   to2?: Pt | null;
   text?: string;
-  colour?: 'chalk' | 'dim' | 'accent';
+  colour?: Ink;
 }
 
 export interface BuiltShape {
@@ -78,9 +78,6 @@ function roughen(d: string, roughness = 0.9): string[] {
   );
 }
 
-function colourOf(c: ShapeSpec['colour']) {
-  return c === 'dim' ? DIM : c === 'accent' ? YELLOW : CHALK;
-}
 
 /**
  * Build one primitive, hidden, ready for an animation to reveal it.
@@ -132,7 +129,7 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
 
   // A link is construction, not content: it says two things already on the
   // board are the same thing, so it defaults to the dimmer chalk.
-  const stroke = colourOf(spec.colour ?? (spec.shape === 'link' ? 'dim' : undefined));
+  const stroke = inkOf(spec.colour ?? (spec.shape === 'link' ? 'dim' : undefined));
   const paths: SVGPathElement[] = [];
   const fades: SVGElement[] = [];
 

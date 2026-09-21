@@ -25,6 +25,7 @@ import { getFigure, parseParams, stepOfPart } from './templates';
 import { toTypesettable } from '@/teacher/latex';
 import { BOTTOM, DERIVATION, FIGURE, toPx, type Pt } from './units';
 import { buildShape, type Shape } from './draw-shapes';
+import { asInk } from './templates/primitives';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -233,7 +234,7 @@ export class Scene {
       to: b,
       to2: to2?.pt ?? null,
       text: op.text,
-      colour: op.colour,
+      colour: op.colour ? asInk(op.colour) : undefined,
     });
     this.layers.figures.appendChild(built.group);
     this.drawings.set(op.id, built.group);

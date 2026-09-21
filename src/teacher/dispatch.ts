@@ -12,6 +12,7 @@
  * during a lesson is just silence.
  */
 import { measure, typesetProblem } from '@/board/math/mathjax';
+import { asInk, inkOf } from '@/board/templates/primitives';
 import { baseId, type MarkStyle, type Op } from '@/board/oplog';
 import type { Scene } from '@/board/scene';
 import { SHAPES } from '@/board/draw-shapes';
@@ -182,7 +183,15 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
         ? (wanted as MarkStyle)
         : 'circle';
       return {
-        ops: [{ kind: 'mark', t: now, id: `${target}-${style}-${Math.round(now)}`, target, style }],
+        ops: [{
+          kind: 'mark',
+          t: now,
+          id: `${target}-${style}-${Math.round(now)}`,
+          target,
+          style,
+          // Unset is chalk, as marks always were.
+          ...(asInk(str(a.colour)) ? { color: inkOf(asInk(str(a.colour))) } : {}),
+        }],
         resume: false,
         note: `mark ${style} ${target}`,
         response: { ok: true, target, style, ...(style !== wanted ? { note: `"${wanted}" is not a style; used circle` } : {}) },
@@ -234,9 +243,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           to: str(a.to) || undefined,
           to2: str(a.to2) || undefined,
           text: str(a.text) || undefined,
-          colour: (['chalk', 'dim', 'accent'] as string[]).includes(str(a.colour))
-            ? (str(a.colour) as 'chalk' | 'dim' | 'accent')
-            : undefined,
+          colour: asInk(str(a.colour)),
         }],
         resume: false,
         note: `draw ${shape} ${id}`,

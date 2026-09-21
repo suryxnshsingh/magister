@@ -25,6 +25,49 @@ export const DIM = '#cfc9b6';
 export const YELLOW = '#f0d264';
 
 /**
+ * The box of coloured chalk.
+ *
+ * Soft, light tones — what coloured chalk actually looks like on a green
+ * board, and legible there at stroke width and at label size (checked by
+ * rendering each on the board's own gradient). Saturated screen colours read
+ * as a UI, not a blackboard.
+ *
+ * The names are the vocabulary for everything that can be coloured: a `draw`
+ * shape, a `mark`, a `note`, and inline in a written line as `blue(N)` — so
+ * the N in the equation and the N arrow on the diagram are named alike.
+ * `accent` is kept as yellow, which it always was.
+ */
+export const INKS = {
+  chalk: CHALK,
+  dim: DIM,
+  yellow: YELLOW,
+  accent: YELLOW,
+  blue: '#8cc8ff',
+  red: '#ff8a95',
+  green: '#a6e89a',
+  orange: '#ffb870',
+  purple: '#c9a8ff',
+} as const;
+
+export type Ink = keyof typeof INKS;
+
+export const INK_NAMES = Object.keys(INKS) as Ink[];
+
+/** An ink's colour by name; anything unknown is plain chalk. */
+export function inkOf(name: string | undefined): string {
+  return name && name in INKS ? INKS[name as Ink] : CHALK;
+}
+
+/** A name the model sent, if it names an ink. */
+export function asInk(name: string): Ink | undefined {
+  const n = name.trim().toLowerCase();
+  if (n === 'white') return 'chalk';
+  if (n === 'pink') return 'red';
+  if (n === 'violet') return 'purple';
+  return n in INKS ? (n as Ink) : undefined;
+}
+
+/**
  * An arrow as ONE path, so shaft and head draw as a single gesture.
  *
  * Two strokes would draw the head after the shaft as a separate animation, and

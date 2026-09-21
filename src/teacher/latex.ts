@@ -109,9 +109,22 @@ function replaceCalls(
   }
 }
 
-/** The board's two non-chalk inks, as MathJax wants them. */
-const YELLOW = '#f0d264';
-const DIM_INK = '#cfc9b6';
+/**
+ * The board's inks, by the names `draw` uses — one vocabulary, so `blue(N)` in
+ * an equation and a blue N arrow are visibly the same thing. Kept in step with
+ * `INKS` in board/templates/primitives.ts, which this module cannot import
+ * without pulling the board into the notation layer.
+ */
+const INKS: Record<string, string> = {
+  accent: '#f0d264',
+  yellow: '#f0d264',
+  dim: '#cfc9b6',
+  blue: '#8cc8ff',
+  red: '#ff8a95',
+  green: '#a6e89a',
+  orange: '#ffb870',
+  purple: '#c9a8ff',
+};
 
 /** Plain notation -> LaTeX. Order matters: longest names first. */
 function plainToLatex(src: string): string {
@@ -141,8 +154,10 @@ function plainToLatex(src: string): string {
 
   // One quantity, one colour, across the equation and the figure beside it.
   // The names match `draw`'s colour words so there is one vocabulary to learn.
-  s = replaceCalls(s, 'accent', ([a]) => `\\textcolor{${YELLOW}}{${plainToLatex(a ?? '')}}`);
-  s = replaceCalls(s, 'dim', ([a]) => `\\textcolor{${DIM_INK}}{${plainToLatex(a ?? '')}}`);
+  for (const [name, hex] of Object.entries(INKS)) {
+    if (name === 'chalk') continue;
+    s = replaceCalls(s, name, ([a]) => `\\textcolor{${hex}}{${plainToLatex(a ?? '')}}`);
+  }
   s = replaceCalls(
     s,
     'frac',

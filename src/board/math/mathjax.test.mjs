@@ -48,3 +48,18 @@ test('TeX that cannot be rescued goes up as plain words', () => {
   assert.ok(m.glyphCount > 0);
   assert.ok(typesetProblem(tex));
 });
+
+test('an equation can name its quantities in the same inks as the diagram', async () => {
+  const { INKS } = await import('../templates/primitives.ts');
+  const { latex } = normaliseMath('blue(N) = red(mg) cos(theta)');
+  assert.ok(latex.includes(`\\textcolor{${INKS.blue}}{N}`), latex);
+  assert.ok(latex.includes(`\\textcolor{${INKS.red}}{mg}`), latex);
+  // Every ink but plain chalk has an inline form, in exactly the board's colour.
+  for (const [name, hex] of Object.entries(INKS)) {
+    if (name === 'chalk') continue;
+    assert.ok(normaliseMath(`${name}(x)`).latex.includes(`\\textcolor{${hex}}`), `${name} drifted from the board`);
+  }
+  const tex = toTypesettable('$blue(N) = red(mg) cos(theta)$');
+  assert.ok(measure(tex).glyphCount > 5);
+  assert.equal(typesetProblem(tex), null, 'every ink typesets');
+});
