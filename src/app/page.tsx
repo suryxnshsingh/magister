@@ -403,7 +403,7 @@ export default function Session() {
       // The reply describes what actually happened, so it is sent now rather
       // than on arrival — and SILENT, unless the model ended its turn on this
       // call and is waiting for it to carry on.
-      wake.answer(call.callId, (waiting) => {
+      const held = wake.answer(call.callId, (waiting) => {
         // Not while the student has the floor: their turn is what the model
         // answers next, and it restarts generation on its own.
         const resume = r.resume || (waiting && !streaming.current);
@@ -418,7 +418,22 @@ export default function Session() {
           expectSpeech('the board');
         }
       });
+      // Held until the generation shows whether it was waiting. If neither
+      // end signal ever comes, send it anyway rather than never.
+      if (held) {
+        window.setTimeout(() => {
+          const waiting = wake.expire(call.callId);
+          if (waiting.length) sched.release(waiting);
+        }, STALL_MS);
+      }
     });
+
+    /** The model finished a generation: if it ended on board calls, it is waiting on them. */
+    const generationOver = () => {
+      const waiting = wake.turnComplete();
+      // Drawn now, not after a lead-in for speech that is never coming.
+      if (waiting.length) sched.release(waiting);
+    };
     schedRef.current = sched;
 
     /**
@@ -478,6 +493,9 @@ export default function Session() {
       // COMMIT: what was never heard is never drawn.
       const dropped = sched.dropUnheard();
       io.flush();
+      // The rest of that turn is gone for good, and the clock has now counted
+      // it as passed — so none of it may be quoted as heard by a later cut.
+      spoken.current = [];
       dropped.forEach((d, i) => {
         wake.drop(d.callId);
         // Tell the model the chalk never moved. Otherwise it believes it drew
@@ -626,11 +644,10 @@ export default function Session() {
         },
         turnEnd: () => {
           speakingRef.current = false;
-          // Ended on board calls, so it is waiting on them: draw them now,
-          // not after a lead-in for speech that is never coming.
-          const waiting = wake.turnComplete();
-          if (waiting.length) sched.release(waiting);
+          generationOver();
         },
+        // Whichever of the two end signals comes first; the second is a no-op.
+        generationEnd: generationOver,
         transcript: (c) => {
           if (c.role === 'model') spoken.current.push({ text: c.text, atSamples: c.atSamples });
           if (c.role === 'user') lastHeard.current += ` ${c.text}`;

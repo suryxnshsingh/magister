@@ -38,6 +38,8 @@ interface Generation {
 export class Wakeup {
   private gen: Generation | null = null;
   private owner = new Map<string, Generation>();
+  /** Which generation is holding each held reply. */
+  private holder = new Map<string, Generation>();
 
   private current(): Generation {
     if (!this.gen || this.gen.done) {
@@ -56,7 +58,10 @@ export class Wakeup {
   /** Speech arrived: nothing asked for before it was being waited on. */
   audio() {
     const g = this.current();
-    for (const send of g.held.values()) send(false);
+    for (const [id, send] of g.held) {
+      this.holder.delete(id);
+      send(false);
+    }
     g.held.clear();
     g.trailing.clear();
   }
@@ -67,7 +72,10 @@ export class Wakeup {
     if (!g || g.done) return;
     g.cut = true;
     g.done = true;
-    for (const send of g.held.values()) send(false);
+    for (const [id, send] of g.held) {
+      this.holder.delete(id);
+      send(false);
+    }
     g.held.clear();
     g.trailing.clear();
   }
@@ -76,35 +84,58 @@ export class Wakeup {
    * The generation is over. Returns the calls it ended on — what the model is
    * now waiting for — so they can be drawn without waiting on speech that is
    * never coming.
+   *
+   * Safe to call for both of the server's end signals; the second is a no-op.
    */
   turnComplete(): string[] {
-    const g = this.gen;
-    if (!g || g.done) return [];
+    return this.gen ? this.finish(this.gen) : [];
+  }
+
+  /**
+   * A reply has been held this long and nothing has said whether the model is
+   * waiting on it. Stop holding it: treat its generation as over. A held reply
+   * that is never sent is worse than any scheduling of it — the model would
+   * be waiting on a call that has already been drawn.
+   */
+  expire(id: string): string[] {
+    const g = this.holder.get(id);
+    return g && g.held.has(id) ? this.finish(g) : [];
+  }
+
+  private finish(g: Generation): string[] {
+    if (g.done) return [];
     g.done = true;
     const waiting = [...g.trailing];
     const held = [...g.held];
     g.held.clear();
     for (const [id, send] of held) {
+      this.holder.delete(id);
       g.trailing.delete(id);
       send(g.trailing.size === 0);
     }
     return waiting;
   }
 
-  /** This call's result is ready. `send` is called now, or once it is known whether to wake. */
-  answer(id: string, send: Send) {
+  /**
+   * This call's result is ready. `send` is called now, or once it is known
+   * whether to wake — in which case this returns true, and the caller should
+   * {@link expire} it if that never becomes known.
+   */
+  answer(id: string, send: Send): boolean {
     const g = this.owner.get(id);
     this.owner.delete(id);
     if (!g || g.cut || !g.trailing.has(id)) {
       send(false);
-      return;
+      return false;
     }
     if (!g.done) {
       g.held.set(id, send);
-      return;
+      this.holder.set(id, g);
+      return true;
     }
     g.trailing.delete(id);
     send(g.trailing.size === 0);
+    return false;
   }
 
   /**
@@ -112,10 +143,11 @@ export class Wakeup {
    * in, or cancelled by the server — and must not be waited on.
    */
   drop(id: string) {
-    const g = this.owner.get(id);
+    const g = this.owner.get(id) ?? this.holder.get(id);
     this.owner.delete(id);
     if (!g) return;
     g.trailing.delete(id);
     g.held.delete(id);
+    this.holder.delete(id);
   }
 }

@@ -136,3 +136,37 @@ test('each generation is judged on its own', () => {
   w.turnComplete();
   assert.deepEqual(sent, ['a:wake', 'b:wake']);
 });
+
+test('either end signal ends the generation, and the second changes nothing', () => {
+  // generationComplete and turnComplete are separate server messages; the
+  // wake must not depend on one of them turning up.
+  const { w, sent, answer } = ledger();
+  w.call('a');
+  answer('a');
+  assert.deepEqual(w.turnComplete(), ['a']);
+  assert.deepEqual(w.turnComplete(), []);
+  assert.deepEqual(sent, ['a:wake']);
+});
+
+test('a held reply is sent even if the turn never says it ended', () => {
+  const { w, sent } = ledger();
+  w.call('a');
+  assert.equal(w.answer('a', (wake) => sent.push(`a:${wake ? 'wake' : 'silent'}`)), true);
+  assert.deepEqual(w.expire('a'), ['a']);
+  assert.deepEqual(sent, ['a:wake']);
+  // And a later generation is untouched by it.
+  w.call('b');
+  assert.deepEqual(w.expire('a'), []);
+  assert.equal(w.answer('b', () => {}), true);
+});
+
+test('expiring a reply that was already sent does nothing', () => {
+  const { w, sent, answer } = ledger();
+  w.call('a');
+  answer('a');
+  w.audio();
+  assert.deepEqual(sent, ['a:silent']);
+  assert.deepEqual(w.expire('a'), []);
+  w.call('b');
+  assert.deepEqual(w.turnComplete(), ['b'], 'the expiry did not end the new generation');
+});

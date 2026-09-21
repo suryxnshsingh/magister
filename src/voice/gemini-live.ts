@@ -159,7 +159,10 @@ export class GeminiLiveSession implements VoiceSession {
      */
     const startedAt = this.received;
 
-    if (sc?.generationComplete) this.trace('generationComplete');
+    if (sc?.generationComplete) {
+      this.trace('generationComplete');
+      this.events.generationEnd?.({ atSamples: this.received, at: performance.now() });
+    }
 
     if (sc?.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {

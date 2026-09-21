@@ -86,6 +86,12 @@ export interface VoiceSessionEvents {
   toolCancel(callIds: string[]): void;
   turnStart(e: TurnEvent): void;
   turnEnd(e: TurnEvent): void;
+  /**
+   * The model has finished generating this turn. Usually just ahead of
+   * `turnEnd`; kept separate because the two are distinct server signals, and
+   * a model waiting on its own tool calls must be noticed on whichever comes.
+   */
+  generationEnd(e: TurnEvent): void;
   /** The server confirmed the student cut in. */
   interrupted(e: TurnEvent): void;
   transcript(c: TranscriptChunk): void;
