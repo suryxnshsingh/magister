@@ -22,6 +22,7 @@ import { RegisterHTMLHandler } from '@mathjax/src/mjs/handlers/html.js';
 // construction: `\require{...}` needs an async loader, which a liteAdaptor
 // built from direct mjs imports does not have — it throws "an asynchronous
 // action is required" instead of loading anything.
+import '@mathjax/src/mjs/input/tex/ams/AmsConfiguration.js';
 import '@mathjax/src/mjs/input/tex/color/ColorConfiguration.js';
 import '@mathjax/src/mjs/input/tex/physics/PhysicsConfiguration.js';
 
@@ -61,7 +62,21 @@ function ensureDoc() {
     // the diagram beside it. Both cost nothing to render: every macro either
     // resolves to ordinary glyph paths or to a rule, which rectsToPaths
     // already handles.
-    InputJax: new TeX({ packages: ['base', 'color', 'physics'] }),
+    //
+    // `ams` because the model writes the notation of a physics textbook, and
+    // that is AMS: \implies, \iff, \dfrac, \boxed. Without it "\implies"
+    // was an undefined control sequence.
+    //
+    // Errors THROW rather than typeset. MathJax's default is to render the
+    // error message itself, on a filled background — which rectsToPaths
+    // faithfully turned into a slab of white chalk across the board, with
+    // "Undefined control sequence \implies" written on it.
+    InputJax: new TeX({
+      packages: ['base', 'ams', 'color', 'physics'],
+      formatError: (_jax: unknown, err: Error) => {
+        throw err;
+      },
+    }),
     // The one setting this module exists to enforce.
     OutputJax: new SVG({ fontCache: 'none' }),
   });
@@ -85,7 +100,57 @@ export interface Typeset {
 }
 
 /** Strip the mjx-container wrapper and hand back the bare <svg> markup. */
+/** What went wrong typesetting a string, by string — read by {@link typesetProblem}. */
+const problems = new Map<string, string>();
+
+/**
+ * Typeset, and if the TeX is broken, typeset the closest thing that is not.
+ *
+ * A command MathJax does not know is set as the word it spells — "\implies"
+ * becomes "implies" in text — and the rest of the line stays maths. Anything
+ * worse than that (unbalanced braces, a bad argument) falls back to the whole
+ * line as plain words. Never an error box: the board always shows the line
+ * the student was meant to read, and {@link typesetProblem} tells the caller
+ * it had to be rescued.
+ */
 function toSvgMarkup(tex: string): string {
+  let attempt = tex;
+  let problem: string | null = null;
+  for (let tries = 0; tries < 6; tries++) {
+    try {
+      const markup = convertMarkup(attempt);
+      if (problem) problems.set(tex, problem);
+      else problems.delete(tex);
+      if (problems.size > 200) problems.delete(problems.keys().next().value as string);
+      return markup;
+    } catch (e) {
+      // MathJax throws its own TexError, which is not an Error — but it
+      // carries a message all the same.
+      const message = (e as { message?: unknown } | null)?.message;
+      problem ??= typeof message === 'string' ? message : String(e);
+      const unknown = typeof message === 'string' && message.match(/Undefined control sequence (\\[A-Za-z]+)/);
+      if (unknown && attempt.includes(unknown[1])) {
+        const word = unknown[1].slice(1);
+        attempt = attempt.split(unknown[1]).join(`\\text{ ${word} }`);
+        continue;
+      }
+      break;
+    }
+  }
+  problems.set(tex, problem ?? 'could not be typeset');
+  const words = tex.replace(/\\([A-Za-z]+)/g, '$1').replace(/[{}\\$]/g, '').replace(/([&#%_^~])/g, ' ');
+  return convertMarkup(`\\text{${words}}`);
+}
+
+/**
+ * Whether `tex` needed rescuing when it was typeset, and why — null when it
+ * went up as written. Only knows about strings this module has typeset.
+ */
+export function typesetProblem(tex: string): string | null {
+  return problems.get(tex) ?? null;
+}
+
+function convertMarkup(tex: string): string {
   const { doc, adaptor } = ensureDoc();
   const node = doc.convert(tex, { display: true });
   const html: string = adaptor.outerHTML(node);

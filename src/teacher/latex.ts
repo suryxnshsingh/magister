@@ -76,7 +76,9 @@ function replaceCalls(
 ): string {
   let out = '';
   let i = 0;
-  const pat = new RegExp(`\\b${name}\\s*\\(`, 'g');
+  // Not after a backslash: `\sin(\theta)` is already LaTeX, and rewriting
+  // it would put a second backslash in front — a TeX line break.
+  const pat = new RegExp(`(?<!\\\\)\\b${name}\\s*\\(`, 'g');
   for (;;) {
     pat.lastIndex = i;
     const m = pat.exec(src);
@@ -160,6 +162,16 @@ function plainToLatex(src: string): string {
     s = s.replace(new RegExp(`(?<!\\\\)\\b${g}\\b`, 'g'), `\\${g} `);
   }
 
+  // Arrows and comparisons, as they are typed. Longest first, so "<=>" is not
+  // read as "<=" and ">".
+  s = s
+    .replace(/<=>/g, ' \\iff ')
+    .replace(/=>/g, ' \\implies ')
+    .replace(/->/g, ' \\to ')
+    .replace(/>=/g, ' \\geq ')
+    .replace(/<=/g, ' \\leq ')
+    .replace(/!=/g, ' \\neq ');
+
   // Braces a single token does not need: \cos{\theta} -> \cos\theta, \cos{30} -> \cos 30
   s = s.replace(/\\(\w+)\{\s*\\(\w+)\s*\}/g, '\\$1\\$2');
   s = s.replace(/\\(\w+)\{\s*(\d+)\s*\}/g, '\\$1 $2');
@@ -190,7 +202,12 @@ export function normaliseMath(input: string): Normalised {
   const repaired = wasCorrupted ? repairControlChars(input) : input;
   const wasLatex = repaired.includes('\\');
   return {
-    latex: wasLatex ? repaired : plainToLatex(repaired),
+    // Converted even when it is partly LaTeX already. Models mix the two in
+    // one span — "\Delta x = (2n-1) frac(\lambda, 2)" — and passing any span
+    // with a backslash through untouched left "frac(λ, 2)" on the board as
+    // four italic letters and a bracket. Every rewrite below leaves real
+    // LaTeX alone, so doing both is safe.
+    latex: plainToLatex(repaired),
     wasCorrupted,
     wasLatex,
   };

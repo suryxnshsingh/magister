@@ -89,6 +89,42 @@ function colourOf(c: ShapeSpec['colour']) {
  * `line` with no `to` becomes a dot at `from`. The teacher is mid-sentence;
  * nothing here is allowed to be an exception.
  */
+/** Greek letters by the names the model writes them in, as they should read on a board. */
+const GREEK: Record<string, string> = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', eta: 'η', theta: 'θ',
+  lambda: 'λ', mu: 'μ', nu: 'ν', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', phi: 'φ',
+  omega: 'ω', Delta: 'Δ', Theta: 'Θ', Phi: 'Φ', Sigma: 'Σ', Omega: 'Ω', Lambda: 'Λ',
+};
+
+/**
+ * Set a label's text the way it would be written on a board, not typed.
+ *
+ * Labels are plain SVG text, so "S_1" went up with its underscore and an
+ * angle named "theta" as the word. Greek names become their letters and `_x`
+ * / `_{xy}` / `^x` become real sub- and superscripts. A backslash — the model
+ * reaching for LaTeX — is dropped rather than shown.
+ */
+export function setLabel(t: SVGTextElement, text: string) {
+  const plain = text
+    .replace(/\\/g, '')
+    .replace(/\b([A-Za-z]+)\b/g, (w) => GREEK[w] ?? w);
+  t.textContent = '';
+  const parts = plain.split(/([_^](?:\{[^}]*\}|\S))/);
+  let shifted = 0;
+  for (const part of parts) {
+    if (!part) continue;
+    const span = document.createElementNS(SVG_NS, 'tspan');
+    const script = /^[_^]/.test(part);
+    // Back to the baseline before anything that is not itself a script.
+    const dy = script ? (part[0] === '_' ? 0.3 : -0.45) - shifted : -shifted;
+    if (dy) span.setAttribute('dy', `${dy}em`);
+    shifted = script ? shifted + dy : 0;
+    if (script) span.setAttribute('font-size', '70%');
+    span.textContent = script ? part.slice(1).replace(/^\{|\}$/g, '') : part;
+    t.appendChild(span);
+  }
+}
+
 export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
   const g = document.createElementNS(SVG_NS, 'g');
   g.setAttribute('data-draw', id);
@@ -177,7 +213,7 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
       t.setAttribute('font-size', '32');
       t.setAttribute('font-style', 'italic');
       t.setAttribute('text-anchor', 'middle');
-      t.textContent = spec.text ?? '';
+      setLabel(t, spec.text ?? '');
       t.style.opacity = '0';
       g.appendChild(t);
       fades.push(t);
@@ -238,7 +274,7 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
           t.setAttribute('font-size', '30');
           t.setAttribute('font-style', 'italic');
           t.setAttribute('text-anchor', 'middle');
-          t.textContent = spec.text;
+          setLabel(t, spec.text);
           t.style.opacity = '0';
           g.appendChild(t);
           fades.push(t);

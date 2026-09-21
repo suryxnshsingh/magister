@@ -11,7 +11,7 @@
  * back as an ordinary response with an explanation, because a thrown error
  * during a lesson is just silence.
  */
-import { measure } from '@/board/math/mathjax';
+import { measure, typesetProblem } from '@/board/math/mathjax';
 import { baseId, type MarkStyle, type Op } from '@/board/oplog';
 import type { Scene } from '@/board/scene';
 import { SHAPES } from '@/board/draw-shapes';
@@ -78,7 +78,11 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
       // where the next line can go — and it has to measure the same string the
       // board will typeset, or a line of prose is measured as maths and the
       // one under it lands on top of it.
-      const m = measure(toTypesettable(raw));
+      const tex = toTypesettable(raw);
+      const m = measure(tex);
+      // Typeset anyway — as words where the TeX was broken — but say so, or
+      // the model goes on writing the thing MathJax cannot read.
+      const problem = typesetProblem(tex);
       const place = scene.resolvePlace(str(a.place) || undefined, m.height);
 
       // An id already in use would orphan every later reference to the
@@ -100,6 +104,10 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           id: finalId,
           renamed: finalId !== id ? `"${id}" was taken` : undefined,
           repaired: wasCorrupted ? 'notation was repaired in transit' : undefined,
+          warning: problem
+            ? `part of this could not be typeset (${problem}) and went up as plain words — ` +
+              'write maths in plain notation, no backslashes: "=>" for implies, frac(a, b), theta'
+            : undefined,
           where: place.intent,
           boardFullness: `${Math.round(scene.fullness() * 100)}%`,
         },
