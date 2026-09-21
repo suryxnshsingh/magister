@@ -115,6 +115,22 @@ export class OpScheduler {
     return dropped.map((s) => s.call);
   }
 
+  /**
+   * These calls ended a turn with no speech after them, so there is no word to
+   * wait for and the model is waiting on them instead. Drop the lead-in: it
+   * holds an op until the turn has been audible, and a turn with nothing to
+   * hear never is — on a lesson opener, where nothing has played yet, the op
+   * would wait for ever. They still wait for whatever audio is queued ahead.
+   */
+  release(callIds: string[]) {
+    const ids = new Set(callIds);
+    const bias = msToSamples(this.opts.biasMs ?? 0);
+    for (const s of this.queue) {
+      if (ids.has(s.call.callId)) s.fireAt = Math.min(s.fireAt, s.call.anchorSamples + bias);
+    }
+    this.queue.sort((a, b) => a.fireAt - b.fireAt);
+  }
+
   /** Vendor cancelled these after an interruption. */
   cancel(callIds: string[]) {
     const ids = new Set(callIds);

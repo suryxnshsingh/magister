@@ -43,6 +43,14 @@ class PlayerProcessor extends AudioWorkletProcessor {
           this.held = false;
           break;
         case 'flush':
+          // What is thrown away still counts as passed. `played` is where
+          // playback stands in the stream the server sent, which is the space
+          // every board op is anchored in; leaving the dropped audio out of it
+          // put each later op that far past anywhere playback would reach, so
+          // after one interruption the chalk came late, and after a long one
+          // it never came at all — and neither did the reply the model was
+          // waiting on to carry on.
+          this.played += this.queued();
           this.queue = [];
           this.cur = null;
           this.off = 0;

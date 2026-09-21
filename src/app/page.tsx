@@ -25,6 +25,7 @@ import { OpScheduler } from '@/voice/scheduler';
 import type { SessionState, ToolCall, VoiceSession } from '@/voice/session';
 import { classifyInterruption } from '@/teacher/backchannel';
 import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from '@/voice/gate';
+import { Wakeup } from '@/voice/wake';
 import { startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
 import { Camera, Mic, MicOff, PhoneOff, Video, VideoOff, X } from 'lucide-react';
@@ -41,10 +42,8 @@ const MODEL = 'gemini-3.8-live';
  */
 const INJECT_INTERRUPT_CONTEXT = true;
 /**
- * A blocking tool stops generation until it is answered. If the answer lands
- * and the teacher still says nothing, the lesson has died mid-explanation —
- * indistinguishable, to a student, from "it said one line and stopped". Nudge
- * it back rather than leaving the board frozen.
+ * How long a teacher that was told to carry on — a blocking tool answered, or
+ * a board call it stopped to wait on — may stay silent before it is nudged.
  */
 const STALL_MS = 3200;
 /**
@@ -370,6 +369,28 @@ export default function Session() {
      * annotation is silently dropped. Both vanish if resolution happens when
      * the chalk actually moves.
      */
+    /**
+     * The model has gone quiet on purpose — waiting on a result — and been
+     * answered. If it still has not spoken after a while, the lesson has died
+     * mid-explanation, indistinguishable to a student from "it said one line
+     * and stopped". Nudge it back rather than leave the board frozen.
+     */
+    const expectSpeech = (after: string) => {
+      awaitingResume.current = performance.now();
+      window.setTimeout(() => {
+        if (!awaitingResume.current) return;
+        if (performance.now() - awaitingResume.current < STALL_MS) return;
+        awaitingResume.current = 0;
+        push('system', `teacher stalled after ${after} — nudged`);
+        sessRef.current?.nudge(
+          'You stopped mid-explanation. Carry on from where you were and finish the whole explanation. Do not restart it.',
+        );
+      }, STALL_MS + 150);
+    };
+
+    /** Which board reply wakes a teacher that stopped to wait for it — see `voice/wake.ts`. */
+    const wake = new Wakeup();
+
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
       for (const op of r.ops) {
@@ -380,13 +401,23 @@ export default function Session() {
       }
       push('system', r.note);
       // The reply describes what actually happened, so it is sent now rather
-      // than on arrival. NON_BLOCKING means nothing is waiting on it.
-      sessRef.current?.sendToolResponse(
-        call.callId,
-        call.name,
-        { ...r.response, board: boardSummary(scene) },
-        r.resume,
-      );
+      // than on arrival — and SILENT, unless the model ended its turn on this
+      // call and is waiting for it to carry on.
+      wake.answer(call.callId, (waiting) => {
+        // Not while the student has the floor: their turn is what the model
+        // answers next, and it restarts generation on its own.
+        const resume = r.resume || (waiting && !streaming.current);
+        sessRef.current?.sendToolResponse(
+          call.callId,
+          call.name,
+          { ...r.response, board: boardSummary(scene) },
+          resume,
+        );
+        if (resume && !r.resume) {
+          push('system', 'teacher was waiting on the board — told it to carry on');
+          expectSpeech('the board');
+        }
+      });
     });
     schedRef.current = sched;
 
@@ -448,6 +479,7 @@ export default function Session() {
       const dropped = sched.dropUnheard();
       io.flush();
       dropped.forEach((d, i) => {
+        wake.drop(d.callId);
         // Tell the model the chalk never moved. Otherwise it believes it drew
         // these and will refer back to things that are not there. The board
         // summary rides on the FIRST one only — several copies of it is a lot
@@ -585,6 +617,7 @@ export default function Session() {
         audio: (pcm) => {
           speakingRef.current = true;
           awaitingResume.current = 0;
+          wake.audio();
           io.push(pcm);
         },
         turnStart: () => {
@@ -593,6 +626,10 @@ export default function Session() {
         },
         turnEnd: () => {
           speakingRef.current = false;
+          // Ended on board calls, so it is waiting on them: draw them now,
+          // not after a lead-in for speech that is never coming.
+          const waiting = wake.turnComplete();
+          if (waiting.length) sched.release(waiting);
         },
         transcript: (c) => {
           if (c.role === 'model') spoken.current.push({ text: c.text, atSamples: c.atSamples });
@@ -612,6 +649,9 @@ export default function Session() {
            * queued sentence is thrown away or resumed, and that is settled
            * when they stop talking.
            */
+          // Generation was cut off whatever is decided below, so nothing it
+          // asked for is being waited on.
+          wake.interrupted();
           const g = gate.current;
           const recent = performance.now() - g.lastVoice < 1500;
           if (!g.speaking && !recent) {
@@ -665,23 +705,18 @@ export default function Session() {
             push('system', r.note);
             session.sendToolResponse(call.callId, call.name, r.response, r.resume);
             // Generation stopped for this. Make sure it starts again.
-            awaitingResume.current = performance.now();
-            window.setTimeout(() => {
-              if (!awaitingResume.current) return;
-              if (performance.now() - awaitingResume.current < STALL_MS) return;
-              awaitingResume.current = 0;
-              push('system', 'teacher stalled after calc — nudged');
-              session.nudge(
-                'You stopped mid-explanation holding that result. Carry on from where you were and finish the whole explanation. Do not restart it.',
-              );
-            }, STALL_MS + 150);
+            expectSpeech('calc');
             return;
           }
+          wake.call(call.callId);
           // Start early enough that the stroke spans the phrase rather than
           // following it — the model emits the call after saying the words.
           sched.enqueue(call, startEarlyMs(call.name, call.args));
         },
-        toolCancel: (ids) => sched.cancel(ids),
+        toolCancel: (ids) => {
+          sched.cancel(ids);
+          ids.forEach((id) => wake.drop(id));
+        },
         error: (m) => push('system', `error: ${m}`),
       },
       () => io.clock.played,

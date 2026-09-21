@@ -12,7 +12,11 @@ const INPUT_RATE = 16_000;
 const OUTPUT_RATE = 24_000;
 
 export interface ClockState {
-  /** Output samples played through the speakers. */
+  /**
+   * How far playback has got through everything the server sent, in output
+   * samples — played, or thrown away by a flush. Every board op is anchored in
+   * this space.
+   */
   played: number;
   /** Smoothed loudness of the teacher's own voice, 0..1 — for display. */
   level: number;
