@@ -411,6 +411,11 @@ export class Scene {
       // resumed once.
       const cut = anim.settleTime(s.from + (t - s.at));
       interruptAt(anim, cut);
+      // The pen's path was built from the whole line. Left alone, it goes on
+      // tracing the part that was just cut off — a dot writing nothing — as
+      // soon as the clock moves again. `build()` rebuilds it for the same
+      // reason after its own cuts.
+      this.refreshPen();
       const obj = this.objects.get(id);
       if (obj) obj.partial = true;
       // The cut as a fraction of the whole line, which is the form the op log

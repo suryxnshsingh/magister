@@ -596,6 +596,13 @@ export default function Session() {
     const takeTheTurn = (reason: string) => {
       bargeIn.current = false;
       heldRef.current = false;
+      // Now the line really is left half-written — at the point the pen froze
+      // when the student began, since the clock has not moved since. This is
+      // what the model is told in the board summary, and the recorder has to
+      // hear it separately: the cut comes from the microphone, not a tool
+      // call, and a replay would otherwise show an uninterrupted line.
+      cutRef.current = scene.interruptActiveWrite();
+      if (cutRef.current) recRef.current?.interrupt(cutRef.current.id, cutRef.current.at);
       const { tail, unheard } = heardSoFar();
       // COMMIT: what was never heard is never drawn.
       const heard = io.clock.played;
@@ -961,15 +968,15 @@ export default function Session() {
             if ((speakingRef.current || io.clock.queued > 0) && !heldRef.current) {
               heldRef.current = true;
               io.hold();
-              // Freezes the pen AND records the line as half-written, which is
-              // what the model is told in the board summary.
-              cutRef.current = scene.interruptActiveWrite();
-              // The freeze comes from the microphone, not a tool call, so the
-              // recorder has to be told about it separately or the replay
-              // shows an uninterrupted line.
-              if (cutRef.current) {
-                recRef.current?.interrupt(cutRef.current.id, cutRef.current.at);
-              }
+              /**
+               * Pause the pen — do not cut the line. This may be a nod, and a
+               * nod carries on: the voice resumes mid-sentence, and the chalk
+               * must resume mid-word with it. Cutting here left every "hmm"
+               * a permanently half-written line ("Young's Double Slit
+               * Experiment (Y"), reported to the model as unfinished. The cut
+               * belongs to `takeTheTurn`, where the student really has the
+               * floor; the frozen clock keeps its place until then.
+               */
               scene.clock.freeze();
               // The pen stopped mid-stroke: that half-line is what they see.
               boardChanged();
