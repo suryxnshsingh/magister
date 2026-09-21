@@ -198,6 +198,11 @@ function plainToLatex(src: string): string {
   // Braces a single token does not need: \cos{\theta} -> \cos\theta, \cos{30} -> \cos 30
   s = s.replace(/\\(\w+)\{\s*\\(\w+)\s*\}/g, '\\$1\\$2');
   s = s.replace(/\\(\w+)\{\s*(\d+)\s*\}/g, '\\$1 $2');
+  // A subscript or power longer than one character: R_eq, v_max, F_net,
+  // 10^19, e^-3. TeX takes only the next character without braces, so R_eq
+  // went up as R-sub-e followed by a q.
+  s = s.replace(/_([A-Za-z0-9]{2,})(?![{\w])/g, '_{$1}');
+  s = s.replace(/\^(-?\d{2,}|-\d)(?![{\d])/g, '^{$1}');
   // "*" reads as multiplication on a board.
   s = s.replace(/\s*\*\s*/g, ' \\times ');
   // Units: bare "m/s", "m/s^2", "s", "m" after a number.

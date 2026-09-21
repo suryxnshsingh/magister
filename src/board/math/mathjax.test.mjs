@@ -76,3 +76,11 @@ test('words inside maths keep their spaces', () => {
   assert.match(latex, /\\text\{ same in series \}/);
   assert.equal(typesetProblem(toTypesettable('$I = text(same in series)$')) ?? null, null);
 });
+
+test('a subscript or power longer than one character stays together', () => {
+  assert.match(normaliseMath('R_eq = R_1 + R_2').latex, /R_\{eq\}/);
+  assert.match(normaliseMath('v_max').latex, /v_\{max\}/);
+  assert.match(normaliseMath('N = 10^19').latex, /10\^\{19\}/);
+  assert.match(normaliseMath('u_x').latex, /u_x/);
+  assert.match(normaliseMath('x^2').latex, /x\^2/);
+});

@@ -11,6 +11,7 @@ import './projectile';
 import './graph';
 import './ray';
 import './lens';
+import './incline';
 
 export {
   describeFigures,

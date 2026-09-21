@@ -153,8 +153,10 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       text: {
         type: 'string',
         description:
-          'The words: a label, an angle or dimension name, a meter letter, a ' +
-          'charge sign, a component name like R_1. Plain notation: theta, F_N.',
+          'Its label, drawn with it. For an arrow ALWAYS its symbol — N, mg, f, T, ' +
+          'v — or the student is left guessing which force it is. Also: an angle ' +
+          'or dimension name, a meter letter, a charge sign, a component name ' +
+          'like R_1, the words of a label. Plain notation: theta, F_N.',
       },
       colour: {
         type: 'string',
