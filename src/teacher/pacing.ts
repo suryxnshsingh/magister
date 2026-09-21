@@ -54,6 +54,43 @@ export function startEarlyMs(name: string, args: Record<string, unknown>): numbe
       // Deixis must be early or it is pointless: the tap belongs ON "yahan
       // dekho", not after it.
       return 850;
+    case 'note':
+      // A margin remark lands as it is said, like a mark.
+      return 600;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Roughly how long an op keeps the chalk busy, ms — so calls the model sends
+ * together can be drawn one after another instead of all at once.
+ *
+ * gemini-3.8-live sends up to seven calls in one message, and every one of
+ * them carries the same position in the audio: without this, a whole
+ * free-body diagram appears in a single frame, which is a slide, not a
+ * teacher drawing it. Zero means "never staggered": an erase is preparation
+ * and must keep its place AHEAD of the work it clears the way for.
+ */
+export function busyMs(name: string, args: Record<string, unknown>): number {
+  switch (name) {
+    case 'write': {
+      const content = typeof args.content === 'string' ? args.content : '';
+      return Math.min(WRITE_MAX, Math.max(WRITE_MIN, content.length * MS_PER_CHAR));
+    }
+    case 'draw':
+      return 650;
+    case 'mark':
+    case 'note':
+      return 550;
+    case 'point':
+      return 620;
+    case 'step':
+      return 900;
+    case 'scene':
+      return 1200;
+    case 'resume':
+      return 1200;
     default:
       return 0;
   }

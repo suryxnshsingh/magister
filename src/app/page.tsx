@@ -27,7 +27,7 @@ import type { SessionState, ToolCall, VoiceSession } from '@/voice/session';
 import { classifyInterruption } from '@/teacher/backchannel';
 import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from '@/voice/gate';
 import { Wakeup } from '@/voice/wake';
-import { startEarlyMs } from '@/teacher/pacing';
+import { busyMs, startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
 import { SPOKEN_TEACHER_PROMPT, SPOKEN_TOOLS } from '@/teacher/scribe';
 import { PHYSICS_VOCABULARY, STUDENT_LANGUAGES } from '@/teacher/hearing';
@@ -538,7 +538,7 @@ export default function Session() {
               .filter((p) => isScribeCall(p.call))
               .map((p) => `${p.call.name} ${JSON.stringify(p.call.args)}`),
           // Already on the word it belongs to: no need to start early.
-          place: (call) => sched.enqueue(call, 0),
+          place: (call) => sched.enqueue(call, 0, busyMs(call.name, call.args)),
           note: (text) => push('system', text),
         })
       : null;
@@ -867,7 +867,7 @@ export default function Session() {
           wake.call(call.callId);
           // Start early enough that the stroke spans the phrase rather than
           // following it — the model emits the call after saying the words.
-          sched.enqueue(call, startEarlyMs(call.name, call.args));
+          sched.enqueue(call, startEarlyMs(call.name, call.args), busyMs(call.name, call.args));
         },
         toolCancel: (ids) => {
           sched.cancel(ids);

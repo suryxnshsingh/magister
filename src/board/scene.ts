@@ -23,7 +23,7 @@ import { type Template } from './templates/projectile';
 import { getFigure, parseParams, stepOfPart } from './templates';
 // Importing these registers them; without it the catalogue is empty.
 import { toTypesettable } from '@/teacher/latex';
-import { BOTTOM, DERIVATION, FIGURE, toPx, type Pt } from './units';
+import { BOTTOM, CANVAS_W, DERIVATION, FIGURE, toPx, type Pt } from './units';
 import { buildShape, type Shape } from './draw-shapes';
 import { asInk } from './templates/primitives';
 
@@ -170,6 +170,21 @@ export class Scene {
           }),
         );
         break;
+      case 'note':
+        for (const a of this.addNote(op, now)) this.clock.add(a);
+        break;
+      case 'resume': {
+        // Back to a line the student cut into, finishing it from the glyph
+        // it stopped on. The replay path has always done this; live, the
+        // teacher now can too.
+        const anim = this.liveWrites.get(op.id);
+        const obj = this.objects.get(op.id);
+        if (anim && obj?.partial) {
+          resumeAt(anim, now);
+          obj.partial = false;
+        }
+        break;
+      }
       case 'point':
         this.liveTaps.push(
           tapWindow(`point:${op.target}:${now}`, now, 620, () => {
@@ -246,6 +261,50 @@ export class Scene {
       out.push(createFadeIn(`${op.id}:t`, built.fades, now + (built.paths.length ? 320 : 0), 260));
     }
     return out;
+  }
+
+  /**
+   * A margin note beside its target, with an arrow to it.
+   *
+   * Placed where a teacher would put it: to the right of the thing, a little
+   * raised; to its left if the right edge is too close; underneath if neither
+   * side has room. Registered as a drawing, so it can be erased and pointed
+   * at like any other.
+   */
+  private addNote(op: Extract<Op, { kind: 'note' }>, now: number): Animation[] {
+    const box = this.boxOf(op.target);
+    if (!box) return [];
+    const colour = op.colour ? asInk(op.colour) : 'yellow';
+    const w = Math.max(40, op.text.length * 15);
+    const GAP = 70;
+    let at: Pt;
+    let tail: Pt;
+    let tip: Pt;
+    if (box.x + box.w + GAP + w < CANVAS_W - 20) {
+      at = { x: box.x + box.w + GAP + w / 2, y: box.y - 14 };
+      tail = { x: at.x - w / 2 - 6, y: at.y + 10 };
+      tip = { x: box.x + box.w + 8, y: box.y + box.h / 2 };
+    } else if (box.x - GAP - w > 20) {
+      at = { x: box.x - GAP - w / 2, y: box.y - 14 };
+      tail = { x: at.x + w / 2 + 6, y: at.y + 10 };
+      tip = { x: box.x - 8, y: box.y + box.h / 2 };
+    } else {
+      at = { x: box.x + box.w / 2, y: box.y + box.h + 64 };
+      tail = { x: at.x, y: at.y - 26 };
+      tip = { x: at.x, y: box.y + box.h + 8 };
+    }
+    const group = document.createElementNS(SVG_NS, 'g');
+    group.setAttribute('data-draw', op.id);
+    const words = buildShape(`${op.id}:text`, { shape: 'label', from: at, text: op.text, colour });
+    const arrow = buildShape(`${op.id}:arrow`, { shape: 'arrow', from: tail, to: tip, colour });
+    group.append(words.group, arrow.group);
+    this.layers.marks.appendChild(group);
+    this.drawings.set(op.id, group);
+    // Written, then the arrow drawn from it to what it is about.
+    return [
+      createFadeIn(`${op.id}:t`, words.fades, now, 300),
+      createDraw(op.id, arrow.paths, now + 260, 420),
+    ];
   }
 
   /** The group a mark draws into, owned here so an erase can find it. */
@@ -614,6 +673,9 @@ export class Scene {
           for (const a of this.addDrawing(op, op.t)) this.clock.add(a);
           break;
         }
+        case 'note':
+          for (const a of this.addNote(op, op.t)) this.clock.add(a);
+          break;
         case 'scene': {
           this.addFigure(op.id, op.name, op.params);
           this.revealStep(op.id, 'setup', op.t);

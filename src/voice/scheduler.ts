@@ -49,6 +49,8 @@ export class OpScheduler {
   private queue: Scheduled[] = [];
   private turnStartPlayed = 0;
   private lastPlayed = 0;
+  /** The last staggered call: the anchor it shared, and when its chalk is free. */
+  private batch: { anchor: number; until: number } | null = null;
 
   constructor(
     private fire: (call: ToolCall) => void,
@@ -78,16 +80,26 @@ export class OpScheduler {
    * the sentence and the writing finish together. There is 5–13s of queued
    * audio to borrow from, so moving a couple of seconds earlier is free.
    */
-  enqueue(call: ToolCall, startEarlyMs = 0) {
+  enqueue(call: ToolCall, startEarlyMs = 0, busyMs = 0) {
     const bias = msToSamples(this.opts.biasMs ?? 0);
     const leadIn = msToSamples(this.opts.turnLeadInMs ?? 300);
     const early = msToSamples(startEarlyMs);
-    const fireAt = Math.max(
+    let fireAt = Math.max(
       call.anchorSamples + bias - early,
       // Never before the turn has been audible: an op cannot precede the
       // first word of the sentence that asked for it.
       this.turnStartPlayed + leadIn,
     );
+    /**
+     * Calls that arrived in one message share one anchor, so without this
+     * they all fire on the same sample and a whole diagram appears at once.
+     * Each waits for the one before it to finish, in the order the model
+     * sent them. `busyMs` of zero opts out — an erase keeps its early place.
+     */
+    if (busyMs > 0) {
+      if (this.batch && this.batch.anchor === call.anchorSamples) fireAt = Math.max(fireAt, this.batch.until);
+      this.batch = { anchor: call.anchorSamples, until: fireAt + msToSamples(busyMs) };
+    }
     this.queue.push({ call, fireAt, enqueuedAt: performance.now() });
     this.queue.sort((a, b) => a.fireAt - b.fireAt);
   }

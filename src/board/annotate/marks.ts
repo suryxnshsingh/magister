@@ -49,6 +49,7 @@ const DEFAULTS: Record<MarkStyle, { duration: number; pad: number }> = {
   cancel: { duration: 300, pad: 6 },
   circle: { duration: 720, pad: 26 },
   box: { duration: 640, pad: 18 },
+  highlight: { duration: 480, pad: 8 },
 };
 
 function buildPaths(style: MarkStyle, b: BBox, pad: number, strokeWidth: number) {
@@ -99,6 +100,19 @@ function buildPaths(style: MarkStyle, b: BBox, pad: number, strokeWidth: number)
       return cut(
         gen.toPaths(gen.rectangle(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2, o)),
       );
+    case 'highlight':
+      // The side of the chalk dragged across a term: one wide stroke the
+      // height of the line, drawn translucent (see createMark) so the term
+      // reads through it.
+      return cut(
+        gen.toPaths(
+          gen.line(b.x - pad, b.y + b.h * 0.52, b.x + b.w + pad, b.y + b.h * 0.48, {
+            ...o,
+            roughness: 0.6,
+            strokeWidth: b.h + pad,
+          }),
+        ),
+      );
   }
 }
 
@@ -141,6 +155,7 @@ export function createMark(
       el.setAttribute('stroke', color);
       el.setAttribute('stroke-width', String(p.strokeWidth || strokeWidth));
       el.setAttribute('stroke-linecap', 'round');
+      if (style === 'highlight') el.setAttribute('stroke-opacity', '0.3');
       host.appendChild(el);
       els.push(el);
     }

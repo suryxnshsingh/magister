@@ -42,7 +42,7 @@ export interface DispatchResult {
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
-const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box', 'cancel'];
+const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box', 'cancel', 'highlight'];
 
 /** Shapes drawn between two points, which are nothing without the second. */
 const NEEDS_TO = new Set([
@@ -132,7 +132,8 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
     }
 
     case 'point':
-    case 'mark': {
+    case 'mark':
+    case 'note': {
       const target = str(a.target);
       // Erased ink is still in the DOM — that is what makes the board seekable
       // — so it still resolves to a box. Pointing at it would tap a wiped part
@@ -184,6 +185,19 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
               : {}),
             drawn: fig ? [...fig.shown] : [],
           },
+        };
+      }
+      if (call.name === 'note') {
+        const text = str(a.text);
+        if (!text) {
+          return { ops: [], resume: false, note: 'note with no text', response: { ok: false, error: 'a note needs text' } };
+        }
+        const id = str(a.id) || `note${scene.drawings.size + 1}`;
+        return {
+          ops: [{ kind: 'note', t: now, id, target, text, colour: asInk(str(a.colour)) }],
+          resume: false,
+          note: `note ${id} on ${target}`,
+          response: { ok: true, id, target },
         };
       }
       if (call.name === 'point') {
@@ -384,6 +398,34 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
         resume: false,
         note: `step ${id}.${step}`,
         response: { ok: true, id, step },
+      };
+    }
+
+    case 'resume': {
+      // Finish a line the student cut into, from the glyph it stopped on.
+      const id = str(a.id);
+      const obj = scene.objects.get(id);
+      if (!obj || scene.erased.has(id)) {
+        return {
+          ops: [],
+          resume: false,
+          note: `resume -> unknown line "${id}"`,
+          response: { ok: false, error: `no line called "${id}" on the board`, onBoard: liveIds(scene) },
+        };
+      }
+      if (!obj.partial) {
+        return {
+          ops: [],
+          resume: false,
+          note: `resume -> "${id}" is already complete`,
+          response: { ok: false, error: `"${id}" is already fully written — nothing to finish` },
+        };
+      }
+      return {
+        ops: [{ kind: 'resume', t: now, id }],
+        resume: false,
+        note: `resume ${id}`,
+        response: { ok: true, id, finished: obj.content },
       };
     }
 

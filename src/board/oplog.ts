@@ -28,7 +28,7 @@ export interface Placement {
   resolved: Pt;
 }
 
-export type MarkStyle = 'underline' | 'circle' | 'strike' | 'box' | 'cancel';
+export type MarkStyle = 'underline' | 'circle' | 'strike' | 'box' | 'cancel' | 'highlight';
 
 interface Common {
   /** Scene time in ms at which this op fires. */
@@ -117,6 +117,20 @@ export interface DrawOp extends Common {
   n?: number;
 }
 
+/**
+ * A margin note: a few words beside something on the board, with an arrow to
+ * it — "constant!", "= 0 at the top", "why?". The most common thing a teacher
+ * writes that is not part of the working.
+ */
+export interface NoteOp extends Common {
+  kind: 'note';
+  id: string;
+  target: string;
+  text: string;
+  /** An ink name — see `INKS`. */
+  colour?: string;
+}
+
 export interface EraseOp extends Common {
   kind: 'erase';
   target: string;
@@ -124,6 +138,7 @@ export interface EraseOp extends Common {
 
 export type Op =
   | DrawOp
+  | NoteOp
   | WriteOp
   | RewriteOp
   | ResumeOp
