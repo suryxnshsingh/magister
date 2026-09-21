@@ -29,6 +29,8 @@ import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from '@/voice/gate';
 import { Wakeup } from '@/voice/wake';
 import { startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
+import { SPOKEN_TEACHER_PROMPT, SPOKEN_TOOLS } from '@/teacher/scribe';
+import { Scribe, isScribeCall } from '@/voice/scribe';
 import { Camera, Mic, MicOff, PhoneOff, Video, VideoOff, X } from 'lucide-react';
 
 import Presence from '@/ui/Presence';
@@ -455,6 +457,15 @@ export default function Session() {
       }, SNAPSHOT_QUIET_MS);
     };
 
+    /**
+     * Two tracks, or one. With `?track=two` the live model only talks, and
+     * the scribe — a fast text model reading its transcript — holds the chalk
+     * (see `teacher/scribe.ts`). Without it, the live model does both, as it
+     * always has. Chosen per lesson so the two can be compared on the same
+     * material.
+     */
+    const twoTrack = new URLSearchParams(window.location.search).get('track') === 'two';
+
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
       for (const op of r.ops) {
@@ -465,6 +476,15 @@ export default function Session() {
       }
       if (r.ops.length) boardChanged();
       push('system', r.note);
+      if (isScribeCall(call)) {
+        // The live model never asked for this, so nobody is waiting on an
+        // answer. The scribe is told what failed, on its next request.
+        const res = r.response as { ok?: boolean; error?: string };
+        if (res.ok === false) {
+          scribe?.failure(`${call.name} ${JSON.stringify(call.args)}: ${res.error ?? 'failed'}`);
+        }
+        return;
+      }
       // The reply describes what actually happened, so it is sent now rather
       // than on arrival — and SILENT, unless the model ended its turn on this
       // call and is waiting for it to carry on.
@@ -495,11 +515,33 @@ export default function Session() {
 
     /** The model finished a generation: if it ended on board calls, it is waiting on them. */
     const generationOver = () => {
+      // The teacher has finished: its last words are a sentence now.
+      scribe?.end();
       const waiting = wake.turnComplete();
       // Drawn now, not after a lead-in for speech that is never coming.
       if (waiting.length) sched.release(waiting);
     };
     schedRef.current = sched;
+
+    const scribe = twoTrack
+      ? new Scribe({
+          ask: (req) =>
+            fetch('/api/scribe', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(req),
+            }).then((res) => res.json()),
+          board: () => boardSummary(scene),
+          pending: () =>
+            sched.pending
+              .filter((p) => isScribeCall(p.call))
+              .map((p) => `${p.call.name} ${JSON.stringify(p.call.args)}`),
+          // Already on the word it belongs to: no need to start early.
+          place: (call) => sched.enqueue(call, 0),
+          note: (text) => push('system', text),
+        })
+      : null;
+    if (scribe) push('system', 'two-track: the teacher talks, the scribe holds the chalk');
 
     /**
      * Let the queued sentence carry on — the student was only nodding.
@@ -556,8 +598,12 @@ export default function Session() {
       heldRef.current = false;
       const { tail, unheard } = heardSoFar();
       // COMMIT: what was never heard is never drawn.
-      const dropped = sched.dropUnheard();
+      const heard = io.clock.played;
+      const all = sched.dropUnheard();
+      // Only the live model's own calls are answered; the scribe's are just dropped.
+      const dropped = all.filter((d) => !isScribeCall(d));
       io.flush();
+      scribe?.cut(heard);
       // The rest of that turn is gone for good, and the clock has now counted
       // it as passed — so none of it may be quoted as heard by a later cut.
       spoken.current = [];
@@ -600,7 +646,7 @@ export default function Session() {
       }
       cutRef.current = null;
       push('system', `barge-in (${reason}) — heard up to "…${tail.slice(-40)}"`);
-      if (dropped.length) push('system', `dropped ${dropped.length} unheard op(s)`);
+      if (all.length) push('system', `dropped ${all.length} unheard op(s)`);
     };
 
     /**
@@ -672,8 +718,8 @@ export default function Session() {
     const session = new GeminiLiveSession(
       {
         model: MODEL,
-        systemInstruction: TEACHER_PROMPT,
-        tools: TEACHER_TOOLS,
+        systemInstruction: twoTrack ? SPOKEN_TEACHER_PROMPT : TEACHER_PROMPT,
+        tools: twoTrack ? SPOKEN_TOOLS : TEACHER_TOOLS,
         /**
          * WE own turn boundaries, not the server.
          *
@@ -714,7 +760,10 @@ export default function Session() {
         // Whichever of the two end signals comes first; the second is a no-op.
         generationEnd: generationOver,
         transcript: (c) => {
-          if (c.role === 'model') spoken.current.push({ text: c.text, atSamples: c.atSamples });
+          if (c.role === 'model') {
+            spoken.current.push({ text: c.text, atSamples: c.atSamples });
+            scribe?.hear(c.text, c.atSamples);
+          }
           if (c.role === 'user') lastHeard.current += ` ${c.text}`;
           push(c.role === 'model' ? 'teacher' : 'student', c.text);
         },
