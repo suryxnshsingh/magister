@@ -20,10 +20,11 @@ import { CANVAS_H, CANVAS_W } from '@/board/units';
 import type { Scene } from '@/board/scene';
 import { createPenElements, renderPen, type PenElements } from '@/board/pen-render';
 import { SessionRecorder } from '@/board/sessions';
-import { AudioIO } from '@/voice/audio';
+import { AudioIO, INPUT_RATE } from '@/voice/audio';
 import { OpScheduler } from '@/voice/scheduler';
 import type { SessionState, ToolCall, VoiceSession } from '@/voice/session';
 import { classifyInterruption } from '@/teacher/backchannel';
+import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from '@/voice/gate';
 import { startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
 import { Camera, Mic, MicOff, PhoneOff, Video, VideoOff, X } from 'lucide-react';
@@ -33,9 +34,6 @@ import type { PresenceState } from '@/ui/presence-types';
 import MathText from '@/ui/MathText';
 
 const MODEL = 'gemini-3.8-live';
-const VAD_FLOOR_MIN = 0.01;
-const VAD_MULTIPLE = 4;
-const VAD_HANG_MS = 320;
 /**
  * Whether to tell the model in words that it was interrupted.
  * Disable if the teacher ever goes silent for good after a barge-in — the
@@ -50,42 +48,27 @@ const INJECT_INTERRUPT_CONTEXT = true;
  */
 const STALL_MS = 3200;
 /**
- * How long speech must last before the server is told about it at all.
- *
- * Under manual activity the server only interrupts when WE say the student
- * spoke, so a blip shorter than this — "haan", a cough, a chair — never
- * reaches it and can never cut the teacher off. Real speech is not lost: the
- * pre-roll buffer below replays what was said during the wait.
+ * Mic audio held back so the start of an utterance is never clipped: the whole
+ * window the commit was judged on, and a little of the breath before it.
  */
-const COMMIT_SPEECH_MS = 260;
-/** Mic audio held back so the start of an utterance is never clipped. */
-const PREROLL_MS = 320;
+const PREROLL_MS = ONSET_WINDOW_MS + 100;
 /**
- * At the moment of committing, the last voiced frame must be no older than
- * this — i.e. the student is still talking, not trailing off inside the hang
- * window that keeps `speaking` true after they stop.
+ * The speaker has made a sound when a played sample reaches this. Quieter than
+ * any syllable, louder than anything whose echo could be mistaken for one.
  */
-const VOICE_RECENT_MS = 120;
+const OUT_AUDIBLE = 0.01;
 /**
- * And they must have been voicing for at least this long. Below it, nothing is
- * a word: a click, a chair, a breath, or the residue of the teacher's own
- * voice. Measured from a failing session, the phantom turns ran 10-81ms.
+ * How long after the speaker falls silent its echo can still reach the
+ * microphone, on top of the output latency the browser reports: the capture
+ * path, the echo canceller's alignment delay (Chromium's macOS loopback
+ * reference adds 170ms, per its source), and the room's own decay.
  */
-const MIN_VOICED_MS = 160;
+const ECHO_TAIL_MS = 250;
 /**
- * How far above the LEARNED echo the student has to be.
- *
- * This used to be a fixed fraction of the speaker output, which is a guess
- * about a room nobody can see: too low and the teacher's own voice commits as
- * the student's, too high and a real barge-in is ignored. There is no single
- * number that is right for both headphones and open speakers.
- *
- * So the echo is measured rather than assumed — see `echoFloor`. A headset
- * drives it to the noise floor and barge-in stays easy; open speakers raise
- * it and the student has to genuinely out-talk the room, which is the honest
- * bar rather than an arbitrary one.
+ * The echo is measured only this soon after a sound was played — while the
+ * speaker is genuinely talking, not in the silence after it.
  */
-const ECHO_MARGIN = 2.5;
+const ECHO_LEARN_MS = 60;
 
 interface Line {
   role: 'teacher' | 'student' | 'system';
@@ -158,14 +141,8 @@ export default function Session() {
   const sessRef = useRef<VoiceSession | null>(null);
   const recRef = useRef<SessionRecorder | null>(null);
   const [lastSession, setLastSession] = useState<string | null>(null);
-  const vad = useRef({
-    speaking: false,
-    lastVoice: 0,
-    floor: 0.02,
-    startedAt: 0,
-    /** What the microphone hears while the teacher talks and nobody else does. */
-    echoFloor: 0,
-  });
+  /** Whether the student is speaking — see `voice/gate.ts`. One per lesson. */
+  const gate = useRef(new SpeechGate());
   /** Most recent student transcript, for telling a nod from a question. */
   const lastHeard = useRef('');
   /** Recent mic chunks, replayed when an utterance commits. */
@@ -198,10 +175,8 @@ export default function Session() {
   const heldFrame = useRef<{ mimeType: string; data: string; at: number } | null>(null);
   /** True between activityStart and activityEnd. */
   const streaming = useRef(false);
-  const commitTimer = useRef(0);
-  /** Live output level — React state is a frame stale inside the audio callback. */
-  const outLevelRef = useRef(0);
-  const echoRef = useRef(0);
+  /** When the speaker last made a sound — the start of the echo's tail. */
+  const lastOutAt = useRef(-Infinity);
   const speakingRef = useRef(false);
   const heldRef = useRef(false);
   /** What the local HOLD froze, so COMMIT can tell the model in words. */
@@ -527,7 +502,7 @@ export default function Session() {
      * Both pieces of evidence — how long they spoke, and what they said —
      * only exist once they stop. So that is when this runs.
      */
-    const settleTurn = (committed: boolean) => {
+    const settleTurn = (committed: boolean, voicedMs: number) => {
       // Nothing of the teacher's was playing, so nothing was interrupted: an
       // ordinary turn, and it must not be reported to the model as a barge-in.
       // The queue is checked as well as the hold, because the hold only arms
@@ -536,11 +511,9 @@ export default function Session() {
         bargeIn.current = false;
         return;
       }
-      const v = vad.current;
-      const verdict = classifyInterruption(
-        Math.max(0, v.lastVoice - v.startedAt),
-        lastHeard.current,
-      );
+      // Voiced time, not the span from first sound to last: a span counts the
+      // silence between two crackles of echo as speaking.
+      const verdict = classifyInterruption(voicedMs, lastHeard.current);
       /**
        * A nod may only be called a nod on the evidence of the WORDS.
        *
@@ -559,7 +532,7 @@ export default function Session() {
        */
       // Too short to be a word at all — never escalate that to taking the
       // turn, whatever else is true about it.
-      if (Math.max(0, v.lastVoice - v.startedAt) < MIN_VOICED_MS) {
+      if (voicedMs < MIN_VOICED_MS) {
         carryOn('too short to be speech');
         return;
       }
@@ -636,9 +609,9 @@ export default function Session() {
            * queued sentence is thrown away or resumed, and that is settled
            * when they stop talking.
            */
-          const v = vad.current;
-          const recent = performance.now() - v.lastVoice < 1500;
-          if (!v.speaking && !recent) {
+          const g = gate.current;
+          const recent = performance.now() - g.lastVoice < 1500;
+          if (!g.speaking && !recent) {
             // The server heard something this microphone did not. Flushing
             // would bin the 5–13s of queued speech and the student would hear
             // almost nothing — which is what "can't hear the teacher" looks
@@ -646,12 +619,12 @@ export default function Session() {
             push('system', 'ignored a server interrupt — no local speech');
             return;
           }
-          if (v.speaking) {
+          if (g.speaking) {
             bargeIn.current = true;
             return;
           }
           // They have already stopped, so it can be settled now.
-          settleTurn(streaming.current);
+          settleTurn(streaming.current, g.voicedMs);
         },
         toolCall: (call: ToolCall) => {
           /**
@@ -715,7 +688,7 @@ export default function Session() {
     io.onClock = (c) => {
       sched.tick(c.played);
       setOutLevel(c.level);
-      outLevelRef.current = c.level;
+      if (c.peak > OUT_AUDIBLE) lastOutAt.current = performance.now();
       setQueued(c.queued);
       if (c.queued > 0 || c.level > 0.012) setAwaiting(false);
     };
@@ -724,157 +697,141 @@ export default function Session() {
     if (io.blocked) {
       push('system', `audio output is ${io.outputState} — the browser blocked playback`);
     }
+    // What the browser really did with the microphone. Asking is not getting,
+    // and the echo guard's numbers mean nothing without knowing which.
+    const mic = io.micSettings();
+    push(
+      'system',
+      `mic: echo cancellation ${mic?.echoCancellation ?? '?'}, noise suppression ${
+        mic?.noiseSuppression ?? '?'
+      }, auto gain ${mic?.autoGainControl ?? '?'} · output latency ${Math.round(io.outputLatencyMs)}ms`,
+    );
+
+    gate.current = new SpeechGate();
+    /** The onset that started the current utterance, for the log. */
+    let onset: { peak: number; bar: number } | null = null;
 
     io.onPcm = (pcm, peak) => {
       setLevel(peak);
       const now = performance.now();
-      const v = vad.current;
-      v.floor = peak < v.floor ? v.floor * 0.9 + peak * 0.1 : v.floor * 0.9995 + peak * 0.0005;
-      // While the teacher is audible, demand a much louder signal — otherwise
-      // its own voice returning through the speakers reads as a barge-in.
-      const echo = outLevelRef.current;
-      echoRef.current = echo;
-      /**
-       * Learn what the teacher's voice comes back as.
-       *
-       * While the teacher is audible and nothing has yet been taken for
-       * speech, whatever the microphone hears IS the leftover echo — the part
-       * cancellation could not remove. Averaging it slowly gives a real
-       * measurement of this room and these speakers, which is the thing the
-       * threshold should be set against. It decays once the teacher stops, so
-       * a student who moves to headphones is not held to yesterday's bar.
-       */
-      if (echo > 0.02 && !v.speaking) {
-        v.echoFloor = v.echoFloor * 0.97 + peak * 0.03;
-      } else if (echo <= 0.02) {
-        v.echoFloor *= 0.999;
-      }
-      /**
-       * Two bars, and the higher one wins: the room's own noise, and the
-       * teacher's voice coming back through the speakers.
-       *
-       * There was a third — the noise floor multiplied by `1 + echo * 7` — and
-       * it was a stand-in for the echo from before anything measured it.
-       * Keeping it next to a real measurement counts the same thing twice and
-       * puts the bar near shouting: a student speaking normally over the
-       * teacher falls just under it and is never heard at all.
-       */
-      const thr = Math.max(
-        VAD_FLOOR_MIN,
-        v.floor * VAD_MULTIPLE,
-        // Above the echo this room actually produces, not a guess at it.
-        v.echoFloor * ECHO_MARGIN,
-      );
+      const sinceOut = now - lastOutAt.current;
+      // The teacher's voice may still be arriving at the microphone.
+      const echoLive = sinceOut < ECHO_TAIL_MS + io.outputLatencyMs;
 
       /**
        * Hold recent audio so a committed utterance can replay its own opening.
        *
-       * Anything captured while the teacher was audible is echo, not speech,
-       * and must never be replayed into the model. This was once relaxed to a
-       * short window on the theory that a barge-in loses its first word
-       * otherwise — and it cost far more than it bought. Prepending even a
-       * fraction of a second of the teacher's own voice to the student's turn
-       * made the recogniser return nonsense: "ray optics" came back as
-       * "leucifix", "noticias", "game of fix", and the model, reasonably,
-       * could not answer any of it.
+       * Anything captured while the teacher's voice could still be reaching
+       * the microphone is echo, not speech, and must never be replayed into
+       * the model. This was once relaxed to a short window on the theory that
+       * a barge-in loses its first word otherwise — and it cost far more than
+       * it bought. Prepending even a fraction of a second of the teacher's own
+       * voice to the student's turn made the recogniser return nonsense: "ray
+       * optics" came back as "leucifix", "noticias", "game of fix", and the
+       * model, reasonably, could not answer any of it.
        *
        * A clipped opening is a small problem. Feeding the model a mixture of
        * two voices and calling it the student is a total one.
+       *
+       * "Could still be reaching" is timed from the last sound the speaker
+       * actually made. It used to be the display envelope, which takes over a
+       * second to fall — so after the teacher was held, the student's first
+       * second was thrown away with the echo that had already stopped.
        */
-      if (echoRef.current > 0.02) preroll.current = [];
+      if (echoLive) preroll.current = [];
       if (!streaming.current) {
         preroll.current.push(pcm);
         const maxChunks = Math.ceil((PREROLL_MS / 1000) * 16000 / 128);
         while (preroll.current.length > maxChunks) preroll.current.shift();
       }
 
-      if (peak > thr) {
-        v.lastVoice = now;
-        if (!v.speaking) {
-          if (echo > 0.02) {
-            // Loud enough to pass the echo bar while the teacher talks — a
-            // genuine barge-in, worth noting so the guard can be tuned.
-            push('system', `barge-in over teacher (mic ${peak.toFixed(2)} vs out ${echo.toFixed(2)})`);
-          }
-          v.speaking = true;
-          v.startedAt = now;
-          lastHeard.current = '';
-          /**
-           * Tell the server only once this really is speech.
-           *
-           * `speaking` is NOT the test for that, and using it alone is how a
-           * silent room committed turn after turn. It stays true through the
-           * whole hang window after the last voiced frame — 320ms — which
-           * outlives this 260ms timer, so ten milliseconds of a chair creaking
-           * was still "speaking" when the timer checked and went to the server
-           * as a student turn. It came back transcribed as "¿Qué?".
-           *
-           * The two things that actually distinguish a word from a click: the
-           * student is STILL voicing when we look, and they have been voicing
-           * long enough for it to be a word. Re-armed rather than abandoned,
-           * so a real sentence with a breath in it still commits.
-           */
-          window.clearTimeout(commitTimer.current);
-          const tryCommit = () => {
-            const s = vad.current;
-            if (streaming.current || !s.speaking) return;
-            const voicedFor = s.lastVoice - s.startedAt;
-            if (performance.now() - s.lastVoice <= VOICE_RECENT_MS && voicedFor >= MIN_VOICED_MS) {
-              streaming.current = true;
-              session.activityStart();
-              for (const chunk of preroll.current) session.sendAudio(chunk);
-              preroll.current = [];
-              return;
+      let sent = false;
+      const events = gate.current.push({
+        now,
+        peak,
+        ms: (pcm.length / INPUT_RATE) * 1000,
+        echoLive,
+        learnEcho: sinceOut < ECHO_LEARN_MS,
+      });
+      for (const e of events) {
+        switch (e.type) {
+          case 'onset':
+            lastHeard.current = '';
+            onset = { peak: e.peak, bar: e.bar };
+            break;
+
+          case 'hold':
+            /**
+             * HOLD: stop the voice and freeze the pen mid-stroke, without
+             * waiting for the server to confirm anything.
+             *
+             * Whenever the student can HEAR the teacher — which is not the
+             * same as the teacher's turn being open. The server finishes
+             * generating seconds before the speaker finishes playing it, and
+             * testing only the open turn meant that for the whole tail of an
+             * explanation a student talking over the teacher did not stop it:
+             * the voice ran on underneath them until they gave up, and what
+             * reached the model was the two of them at once.
+             */
+            if ((speakingRef.current || io.clock.queued > 0) && !heldRef.current) {
+              heldRef.current = true;
+              io.hold();
+              // Freezes the pen AND records the line as half-written, which is
+              // what the model is told in the board summary.
+              cutRef.current = scene.interruptActiveWrite();
+              // The freeze comes from the microphone, not a tool call, so the
+              // recorder has to be told about it separately or the replay
+              // shows an uninterrupted line.
+              if (cutRef.current) {
+                recRef.current?.interrupt(cutRef.current.id, cutRef.current.at);
+              }
+              scene.clock.freeze();
+              if (onset) {
+                push(
+                  'system',
+                  `held the teacher (mic ${onset.peak.toFixed(3)} vs bar ${onset.bar.toFixed(3)})`,
+                );
+              }
             }
-            commitTimer.current = window.setTimeout(tryCommit, 60);
-          };
-          commitTimer.current = window.setTimeout(tryCommit, COMMIT_SPEECH_MS);
-          // HOLD: stop the voice and freeze the pen mid-stroke immediately,
-          // without waiting for the server to confirm the interruption.
-          if (speakingRef.current && !heldRef.current) {
-            heldRef.current = true;
-            io.hold();
-            // Freezes the pen AND records the line as half-written, which is
-            // what the model is told in the board summary.
-            cutRef.current = scene.interruptActiveWrite();
-            // The freeze comes from the microphone, not a tool call, so the
-            // recorder has to be told about it separately or the replay shows
-            // an uninterrupted line.
-            if (cutRef.current) {
-              recRef.current?.interrupt(cutRef.current.id, cutRef.current.at);
-            }
-            scene.clock.freeze();
-          }
+            break;
+
+          case 'commit':
+            // Tell the server only now — see `voice/gate.ts` for what makes
+            // this speech rather than a crackle.
+            streaming.current = true;
+            session.activityStart();
+            // The pre-roll already holds this block, so it is not sent twice.
+            for (const chunk of preroll.current) session.sendAudio(chunk);
+            preroll.current = [];
+            sent = true;
+            break;
+
+          case 'reject':
+            // Never committed — the server was never told, so nothing of the
+            // teacher's was interrupted and the queued sentence carries on.
+            if (bargeIn.current) settleTurn(false, e.voicedMs);
+            else if (heldRef.current) carryOn(`blip, ${Math.round(e.voicedMs)}ms`);
+            break;
+
+          case 'end':
+            streaming.current = false;
+            session.activityEnd();
+            // Handed over; now we are waiting on the teacher.
+            setAwaiting(true);
+            /**
+             * Settled AFTER the turn is handed over, never during it.
+             *
+             * Injecting context while the student's audio is still streaming
+             * was measured to produce garbage — in one probe the model spoke
+             * its own markup aloud. This order is the one that was measured
+             * clean, and reasoning about ordering guarantees does not outrank
+             * that.
+             */
+            settleTurn(true, e.voicedMs);
+            break;
         }
-      } else if (v.speaking && now - v.lastVoice > VAD_HANG_MS) {
-        v.speaking = false;
-        window.clearTimeout(commitTimer.current);
-        const committed = streaming.current;
-        if (committed) {
-          streaming.current = false;
-          session.activityEnd();
-          // Handed over; now we are waiting on the teacher.
-          setAwaiting(true);
-        } else {
-          // Never committed — a blip the server was never told about.
-          push('system', 'blip ignored — teacher not interrupted');
-        }
-        /**
-         * Settled AFTER the turn is handed over, never during it.
-         *
-         * Injecting context while the student's audio is still streaming was
-         * measured to produce garbage — in one probe the model spoke its own
-         * markup aloud. This order is the one that was measured clean, and
-         * reasoning about ordering guarantees does not outrank that.
-         *
-         * The utterance is over, so there is finally something to judge it on.
-         * A blip the server was never told about cannot have interrupted
-         * anything, so the queued sentence simply carries on.
-         */
-        if (committed || bargeIn.current) settleTurn(committed);
-        else if (heldRef.current) carryOn('blip');
       }
-      if (streaming.current) session.sendAudio(pcm);
+      if (streaming.current && !sent) session.sendAudio(pcm);
     };
 
     await session.connect();

@@ -14,8 +14,14 @@ const OUTPUT_RATE = 24_000;
 export interface ClockState {
   /** Output samples played through the speakers. */
   played: number;
-  /** Smoothed loudness of the teacher's own voice, 0..1. */
+  /** Smoothed loudness of the teacher's own voice, 0..1 — for display. */
   level: number;
+  /**
+   * Loudest sample played since the last update, unsmoothed — whether the
+   * speaker is making a sound right now. The echo guard needs this and not
+   * `level`, which lags the voice by over a second on the way down.
+   */
+  peak: number;
   /** Output samples handed to the player. */
   received: number;
   /** Still waiting to be heard. */
@@ -29,7 +35,7 @@ export class AudioIO {
   private player: AudioWorkletNode | null = null;
   private stream: MediaStream | null = null;
 
-  clock: ClockState = { played: 0, received: 0, queued: 0, level: 0 };
+  clock: ClockState = { played: 0, received: 0, queued: 0, level: 0, peak: 0 };
   /** Set when the browser refused to start audio. Surfaced, never swallowed. */
   blocked = false;
   /** Mic level 0..1, for the orb and for local VAD. */
@@ -91,6 +97,7 @@ export class AudioIO {
         received: m.received,
         queued: m.queued,
         level: m.level ?? 0,
+        peak: m.peak ?? 0,
       };
       this.onClock?.(this.clock);
     };
@@ -110,6 +117,22 @@ export class AudioIO {
   /** For diagnostics: is audio actually able to come out? */
   get outputState(): string {
     return this.outCtx?.state ?? 'none';
+  }
+
+  /**
+   * From the player to the speaker, ms, as the browser reports it. Bluetooth
+   * speakers can add a fifth of a second here, and the echo arrives that much
+   * later, so the echo guard has to wait that much longer for it to clear.
+   */
+  get outputLatencyMs(): number {
+    const c = this.outCtx;
+    if (!c) return 0;
+    return ((c.outputLatency || 0) + (c.baseLatency || 0)) * 1000;
+  }
+
+  /** What the browser actually applied to the microphone, which is not always what was asked. */
+  micSettings(): MediaTrackSettings | null {
+    return this.stream?.getAudioTracks()[0]?.getSettings() ?? null;
   }
 
   /** Queue a chunk of the teacher's voice. */

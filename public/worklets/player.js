@@ -26,6 +26,8 @@ class PlayerProcessor extends AudioWorkletProcessor {
     this.tick = 0;
     /** Smoothed output loudness 0..1 — the teacher's voice. */
     this.level = 0;
+    /** Loudest raw sample since the last clock message. Not smoothed. */
+    this.peak = 0;
 
     this.port.onmessage = (e) => {
       const m = e.data;
@@ -97,9 +99,16 @@ class PlayerProcessor extends AudioWorkletProcessor {
     const RELEASE = 0.012;
     const k = peak > this.level ? ATTACK : RELEASE;
     this.level += (peak - this.level) * k;
+    if (peak > this.peak) this.peak = peak;
 
     // ~every 10ms at 24kHz. Often enough to schedule ops against, cheap
     // enough not to flood the main thread.
+    //
+    // `level` is for the eye and `peak` is for the echo guard, and they must
+    // not be swapped. The envelope takes over a second to fall after the voice
+    // stops; the echo in the room stops at once. Judging the echo by the
+    // envelope counted every pause in the teacher's speech as more echo, so
+    // the bar sagged exactly when the teacher was about to start again.
     if (++this.tick % 2 === 0) {
       this.port.postMessage({
         type: 'clock',
@@ -107,7 +116,9 @@ class PlayerProcessor extends AudioWorkletProcessor {
         received: this.received,
         queued: this.queued(),
         level: this.level,
+        peak: this.peak,
       });
+      this.peak = 0;
     }
     return true;
   }
