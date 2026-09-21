@@ -34,10 +34,8 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'fractions as frac(numerator, denominator), powers as u^2, subscripts as u_x, ' +
       'multiplication as *. Vectors as vec(F), unit vectors as hat(n), ' +
       'derivatives as dv(x,t) and pdv(u,x) — use them, a vector should look ' +
-      'like a vector. Colour a quantity by wrapping it in its chalk: yellow(...), ' +
-      'blue(...), red(...), green(...), orange(...), purple(...) — the SAME colour ' +
-      'you draw that quantity in, so the N in "$blue(N) = red(mg) cos(theta)$" and ' +
-      'the blue N arrow on the diagram are visibly one thing. ' +
+      'like a vector. To colour symbols the way they are coloured on the diagram, ' +
+      'list them in colours — the content itself stays plain. ' +
       'Example: "$u_x = u cos(theta) = 17.3 m/s$". ' +
       'Example: "$R = frac(u^2 sin(2 theta), g)$". ' +
       'Give each line a short meaningful id you can refer to later, like "ux" or "range".',
@@ -50,6 +48,12 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       place: {
         type: 'string',
         description: 'Where it goes: "title", or "under:<id>" of an existing line.',
+      },
+      colours: {
+        type: 'string',
+        description:
+          'Symbols to colour, matching the diagram: "N=blue, mg=red, f=orange". ' +
+          'The N arrow is blue, so the N in the equation is blue too.',
       },
     },
     required: ['id', 'content'],
@@ -371,13 +375,15 @@ export const PROMPT_COLOUR = `## Colour
 You have a box of coloured chalk: chalk (white), yellow, blue, red, green, orange, purple — and dim for construction. Use it on every diagram. A diagram in one colour leaves the student to do the sorting that colour does for free.
 
 Colour means what a thing IS, and a thing keeps its colour everywhere it appears — the arrow, its label, its term in the equation:
-- Forces, one colour each for the whole problem: weight red, normal reaction blue, friction orange, tension green, anything applied purple. Write "$blue(N) = red(mg) cos(theta)$" and draw the N arrow blue and the mg arrow red.
+- Forces, one colour each for the whole problem: weight red, normal reaction blue, friction orange, tension green, anything applied purple. The N in the equation you write is blue like the N arrow and the mg red like the mg arrow — give write its colours list.
 - What the question asks for is yellow — in the working and on the diagram. Given values stay chalk.
 - Motion: velocity and acceleration each their own colour, distinct from the forces.
 - Light: the incident ray one colour, the reflected or refracted ray another; the normal dim.
 - Fields: electric purple, magnetic blue. Charges: positive red, negative blue.
 - Circuits: the component the question is about in colour, the rest in chalk.
 - Axes, normals, construction lines, dimensions: dim.
+
+Colour lives on the chalk only. Out loud you say "N equals m g cos theta" — never a colour, never a dollar sign, never a bracket. The student hears physics; the board shows the colour.
 
 Three or four colours on a diagram, not seven. And never let colour carry a meaning on its own: every arrow, ray and field you draw gets its label at its tip, in its colour — N, mg, f, T, v, E — the same symbol the equation uses. An unlabelled arrow is a guess the student has to make.
 

@@ -84,3 +84,15 @@ test('a subscript or power longer than one character stays together', () => {
   assert.match(normaliseMath('u_x').latex, /u_x/);
   assert.match(normaliseMath('x^2').latex, /x\^2/);
 });
+
+test('symbols are coloured from a list beside the line, never from markup in it', async () => {
+  const { applyColours } = await import('../../teacher/latex.ts');
+  const { INKS } = await import('../templates/primitives.ts');
+  const out = applyColours('$N - mg cos(theta) = 0$, and $(N)$ again, not mgh', 'N=blue, mg=red');
+  assert.equal(out, '$blue(N) - red(mg) cos(theta) = 0$, and $(blue(N))$ again, not mgh');
+  // Longest first, and a symbol inside another is left alone.
+  assert.equal(applyColours('$F_net = F - f$', 'F=purple, F_net=yellow, f=orange'), '$yellow(F_net) = purple(F) - orange(f)$');
+  assert.equal(applyColours('$x$', 'x=mauve'), '$x$', 'an unknown ink changes nothing');
+  const tex = toTypesettable(out);
+  assert.ok(tex.includes(`\\textcolor{${INKS.blue}}{N}`) && tex.includes(`\\textcolor{${INKS.red}}{mg}`), tex);
+});

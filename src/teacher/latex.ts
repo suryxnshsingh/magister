@@ -295,6 +295,33 @@ export function toTypesettable(content: string): string {
   return out.join('');
 }
 
+/**
+ * Colour symbols in a line from a separate list — "N=blue, mg=red" — instead
+ * of markup in the line itself.
+ *
+ * Markup in the content is what the live model reads aloud: with
+ * "$red(mg)$" in its examples, its speech came out as "gravitational force
+ * $red(mg)$ hamesha straight down". A list beside the line keeps the line
+ * plain maths, which is all it narrates. Whole symbols only, and only inside
+ * the maths — "mg" is coloured in "mg cos(theta)", not inside "mgh".
+ */
+export function applyColours(content: string, colours: string): string {
+  const pairs = colours
+    .split(',')
+    .map((p) => p.split('=').map((x) => x.trim()))
+    .filter((p): p is [string, string] => p.length === 2 && !!p[0] && p[1].toLowerCase() in INKS)
+    // Longest first, so "F_net" is taken before "F".
+    .sort((a, b) => b[0].length - a[0].length);
+  if (!pairs.length) return content;
+  // One pass over all of them, so a replacement is never matched again —
+  // the "m" of a coloured "mg" stays inside it.
+  const ink = new Map(pairs.map(([sym, name]) => [sym, name.toLowerCase()]));
+  const alternatives = pairs.map(([sym]) => sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const pattern = new RegExp(`(?<![\\w\\\\])(${alternatives})(?![\\w])`, 'g');
+  const colour = (math: string) => math.replace(pattern, (sym) => `${ink.get(sym)}(${sym})`);
+  return content.includes('$') ? content.replace(/\$([^$]*)\$/g, (_m, inner: string) => `$${colour(inner)}$`) : colour(content);
+}
+
 export function normaliseContent(content: string): Normalised {
   let corrupted = false;
   let sawLatex = false;

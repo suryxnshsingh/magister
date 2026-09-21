@@ -20,7 +20,7 @@ import { figureNames, getFigure } from '@/board/templates';
 import type { ToolCall } from '@/voice/session';
 
 import { evaluate } from './calc';
-import { normaliseContent, toTypesettable } from './latex';
+import { applyColours, normaliseContent, toTypesettable } from './latex';
 
 export interface DispatchResult {
   /**
@@ -86,7 +86,8 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
   switch (call.name) {
     case 'write': {
       const id = str(a.id) || `line${scene.objects.size + 1}`;
-      const raw = str(a.content);
+      // Symbols coloured to match the diagram, from a list beside the line.
+      const raw = str(a.colours) ? applyColours(str(a.content), str(a.colours)) : str(a.content);
       if (!raw) {
         return { ops: [], resume: false, note: 'write with no content', response: { ok: false, error: 'content was empty' } };
       }
