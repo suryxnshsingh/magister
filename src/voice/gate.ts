@@ -113,9 +113,9 @@ export type GateEvent =
   /** It is speech: tell the server. */
   | { type: 'commit'; voicedMs: number }
   /** It stopped before it was speech. Anything held should carry on. */
-  | { type: 'reject'; voicedMs: number }
+  | { type: 'reject'; voicedMs: number; spanMs: number }
   /** A committed utterance is over. */
-  | { type: 'end'; voicedMs: number };
+  | { type: 'end'; voicedMs: number; spanMs: number };
 
 export class SpeechGate {
   /** The room's own noise, tracked low. */
@@ -133,6 +133,30 @@ export class SpeechGate {
   /** Voiced time in the current (or last) utterance. */
   voicedMs = 0;
   private voiced: { t: number; ms: number }[] = [];
+
+  /**
+   * First voiced block to last, ms. Not a measure of whether it was SPEECH —
+   * see the top of this file — but the right measure of how long someone who
+   * was speaking went on for, which is what tells a nod from a question.
+   */
+  get spanMs(): number {
+    return Math.max(0, this.lastVoice - this.startedAt);
+  }
+
+  /**
+   * May this block go into the pre-roll that is replayed when the utterance
+   * commits? Asked before the block is pushed.
+   *
+   * Not while the teacher's voice could still be reaching the microphone: a
+   * pre-roll that opens with the teacher's own words, even faintly, is how
+   * "ray optics" reached the model as "leucifix". Except once the student has
+   * voiced enough to hold the teacher — from then the echo still in the air
+   * is underneath a voice that is clearly theirs, not in front of it, and
+   * dropping it would drop the opening of what they are saying too.
+   */
+  prerollable(echoLive: boolean): boolean {
+    return !echoLive || this.holding;
+  }
 
   /** The bar a block has to clear. */
   bar(echoLive: boolean): number {
@@ -203,12 +227,12 @@ export class SpeechGate {
       if (!this.committed && gap > REJECT_GAP_MS) {
         this.speaking = false;
         this.holding = false;
-        events.push({ type: 'reject', voicedMs: this.voicedMs });
+        events.push({ type: 'reject', voicedMs: this.voicedMs, spanMs: this.spanMs });
       } else if (this.committed && gap > VAD_HANG_MS) {
         this.speaking = false;
         this.committed = false;
         this.holding = false;
-        events.push({ type: 'end', voicedMs: this.voicedMs });
+        events.push({ type: 'end', voicedMs: this.voicedMs, spanMs: this.spanMs });
       }
     }
     return events;

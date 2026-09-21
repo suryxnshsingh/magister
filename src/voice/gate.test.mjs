@@ -12,7 +12,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MIN_VOICED_MS, SpeechGate } from './gate.ts';
+import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from './gate.ts';
+import { classifyInterruption } from '../teacher/backchannel.ts';
 
 const BLOCK = 8; // 128 samples at 16 kHz
 const LOUD = 0.2;
@@ -21,6 +22,8 @@ const ROOM = 0.001;
 const LATENCY = 200;
 /** How long after the speaker falls silent its echo may still arrive (the page's tail). */
 const TAIL = 250;
+/** The page's pre-roll. */
+const PREROLL = ONSET_WINDOW_MS + 100;
 
 /** Deterministic noise, so a failure reproduces. */
 function rng(seed) {
@@ -47,20 +50,31 @@ function gauss(r) {
  *
  * Holds are applied the way the page applies them: a hold silences the
  * speaker until the utterance is rejected (resume) or ends (the turn is taken).
+ * So is the pre-roll, and what it holds at each commit is kept — every block
+ * tagged with what was really in it.
  */
 function room({ ms, start = 0, teacher = () => false, residual = () => 0, student = () => 0, gate = new SpeechGate() }) {
   const events = [];
   const played = [];
   let held = false;
   let lastOut = -Infinity;
+  let preroll = [];
   for (let t = start; t < start + ms; t += BLOCK) {
     const playing = teacher(t) && !held;
     played.push(playing);
     if (playing) lastOut = t;
     const echoed = played[Math.floor((t - start - LATENCY) / BLOCK)] ? residual(t) : 0;
-    const peak = Math.max(ROOM, echoed, student(t));
-    for (const e of gate.push({ now: t, peak, ms: BLOCK, echoLive: t - lastOut < TAIL, learnEcho: playing })) {
-      events.push({ t, ...e });
+    const voice = student(t);
+    const peak = Math.max(ROOM, echoed, voice);
+    const echoLive = t - lastOut < TAIL;
+    if (!gate.prerollable(echoLive)) preroll = [];
+    if (!gate.committed) {
+      preroll.push({ t, echo: echoed > ROOM, student: voice > 0 });
+      while (preroll.length > PREROLL / BLOCK) preroll.shift();
+    }
+    for (const e of gate.push({ now: t, peak, ms: BLOCK, echoLive, learnEcho: playing })) {
+      events.push(e.type === 'commit' ? { t, ...e, preroll } : { t, ...e });
+      if (e.type === 'commit') preroll = [];
       if (e.type === 'hold' && teacher(t)) held = true;
       if (e.type === 'reject') held = false;
       if (e.type === 'end') held = false;
@@ -193,4 +207,40 @@ test('an estimate that starts low climbs instead of starving', () => {
   const { count } = room({ ms: 15000, start: 8000, teacher: () => true, residual: residualEcho(5, 0.008), gate });
   assert.equal(count('commit'), 0);
   assert.ok(gate.bar(true) > 0.025, `bar ${gate.bar(true).toFixed(4)}`);
+});
+
+test('a barge-in keeps what the student said once they had the floor', () => {
+  // The echo tail outlives the hold by a quarter of a second, so clearing the
+  // pre-roll for all of it left nothing to replay at commit: the model heard
+  // the student from the middle of their first word.
+  const teacher = (t) => t < 8000;
+  const student = (t) => (t >= 5000 && t < 5700 ? 0.08 : 0);
+  const { events } = room({ ms: 9000, teacher, residual: residualEcho(11), student });
+  const commit = events.find((e) => e.type === 'commit');
+  const theirs = commit.preroll.filter((b) => b.student).length * BLOCK;
+  assert.ok(theirs >= 64, `pre-roll held ${theirs}ms of the student`);
+});
+
+test('nothing of the teacher is replayed in front of the student', () => {
+  // The teacher stops; its echo is still arriving when the student starts.
+  // Keeping the tail from the moment the speaker went quiet would open the
+  // student's turn with the teacher's own last words.
+  const teacher = (t) => t < 3000;
+  const student = (t) => (t >= 3080 && t < 3800 ? 0.08 : 0);
+  const { events } = room({ ms: 4500, teacher, residual: residualEcho(4), student });
+  const commit = events.find((e) => e.type === 'commit');
+  const first = commit.preroll.find((b) => b.echo || b.student);
+  assert.ok(first && first.student, `pre-roll opens with ${first ? 'echo' : 'nothing'}`);
+});
+
+test('a real question broken by its consonants is not taken for a nod', () => {
+  // Four words with a stop between each: 900ms of speaking, 600ms of it
+  // voiced. The nod/question cutoff was tuned on the first number; given the
+  // second it would call this "haan" whenever the transcript is late.
+  const words = [];
+  for (let at = 300; at < 1200; at += 250) words.push([at, 150]);
+  const { events } = room({ ms: 2000, student: crackles(words) });
+  const end = events.find((e) => e.type === 'end');
+  assert.equal(classifyInterruption(end.spanMs, '').isBackchannel, false, `span ${end.spanMs}ms`);
+  assert.equal(classifyInterruption(end.voicedMs, '').isBackchannel, true, 'voiced time would have');
 });

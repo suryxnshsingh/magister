@@ -502,7 +502,7 @@ export default function Session() {
      * Both pieces of evidence — how long they spoke, and what they said —
      * only exist once they stop. So that is when this runs.
      */
-    const settleTurn = (committed: boolean, voicedMs: number) => {
+    const settleTurn = (committed: boolean, heard: { voicedMs: number; spanMs: number }) => {
       // Nothing of the teacher's was playing, so nothing was interrupted: an
       // ordinary turn, and it must not be reported to the model as a barge-in.
       // The queue is checked as well as the hold, because the hold only arms
@@ -511,9 +511,11 @@ export default function Session() {
         bargeIn.current = false;
         return;
       }
-      // Voiced time, not the span from first sound to last: a span counts the
-      // silence between two crackles of echo as speaking.
-      const verdict = classifyInterruption(voicedMs, lastHeard.current);
+      // The span, which is what the nod/question cutoff was tuned on. Voiced
+      // time runs short of it in every word — the gaps at each consonant —
+      // and would read a real question as a nod whenever the transcript is
+      // late. Whether it was speech at all is the gate's call, already made.
+      const verdict = classifyInterruption(heard.spanMs, lastHeard.current);
       /**
        * A nod may only be called a nod on the evidence of the WORDS.
        *
@@ -531,8 +533,9 @@ export default function Session() {
        * the alternative is ignoring the student.
        */
       // Too short to be a word at all — never escalate that to taking the
-      // turn, whatever else is true about it.
-      if (voicedMs < MIN_VOICED_MS) {
+      // turn, whatever else is true about it. A committed utterance always
+      // clears this; it guards a server interrupt the gate never committed.
+      if (heard.voicedMs < MIN_VOICED_MS) {
         carryOn('too short to be speech');
         return;
       }
@@ -624,7 +627,7 @@ export default function Session() {
             return;
           }
           // They have already stopped, so it can be settled now.
-          settleTurn(streaming.current, g.voicedMs);
+          settleTurn(streaming.current, g);
         },
         toolCall: (call: ToolCall) => {
           /**
@@ -736,9 +739,12 @@ export default function Session() {
        * "Could still be reaching" is timed from the last sound the speaker
        * actually made. It used to be the display envelope, which takes over a
        * second to fall — so after the teacher was held, the student's first
-       * second was thrown away with the echo that had already stopped.
+       * second was thrown away with the echo that had already stopped. And
+       * once the student is clearly talking over the teacher, what is left of
+       * the echo is under their voice rather than ahead of it — see
+       * `SpeechGate.prerollable`.
        */
-      if (echoLive) preroll.current = [];
+      if (!gate.current.prerollable(echoLive)) preroll.current = [];
       if (!streaming.current) {
         preroll.current.push(pcm);
         const maxChunks = Math.ceil((PREROLL_MS / 1000) * 16000 / 128);
@@ -809,7 +815,7 @@ export default function Session() {
           case 'reject':
             // Never committed — the server was never told, so nothing of the
             // teacher's was interrupted and the queued sentence carries on.
-            if (bargeIn.current) settleTurn(false, e.voicedMs);
+            if (bargeIn.current) settleTurn(false, e);
             else if (heldRef.current) carryOn(`blip, ${Math.round(e.voicedMs)}ms`);
             break;
 
@@ -827,7 +833,7 @@ export default function Session() {
              * clean, and reasoning about ordering guarantees does not outrank
              * that.
              */
-            settleTurn(true, e.voicedMs);
+            settleTurn(true, e);
             break;
         }
       }
