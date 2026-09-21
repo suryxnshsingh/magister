@@ -126,6 +126,10 @@ export interface SessionConfig {
   silenceDurationMs?: number;
   /** Drive turn boundaries from our own VAD instead of the server's. */
   manualActivity?: boolean;
+  /** BCP-47 languages the student's speech is transcribed as — see `teacher/hearing.ts`. */
+  inputLanguages?: string[];
+  /** Terms the student's transcriber should expect. */
+  inputVocabulary?: string[];
 }
 
 export interface VoiceSession {

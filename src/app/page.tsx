@@ -30,6 +30,7 @@ import { Wakeup } from '@/voice/wake';
 import { startEarlyMs } from '@/teacher/pacing';
 import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
 import { SPOKEN_TEACHER_PROMPT, SPOKEN_TOOLS } from '@/teacher/scribe';
+import { PHYSICS_VOCABULARY, STUDENT_LANGUAGES } from '@/teacher/hearing';
 import { Scribe, isScribeCall } from '@/voice/scribe';
 import { Camera, Mic, MicOff, PhoneOff, Video, VideoOff, X } from 'lucide-react';
 
@@ -755,6 +756,10 @@ export default function Session() {
          * audio is only streamed while the student is actually speaking.
          */
         manualActivity: true,
+        // Heard as Hindi and English: a stray sound was otherwise transcribed
+        // as Spanish — the "¿Qué?" turns.
+        inputLanguages: STUDENT_LANGUAGES,
+        inputVocabulary: PHYSICS_VOCABULARY,
       },
       {
         state: (s) => {

@@ -111,7 +111,10 @@ export class GeminiLiveSession implements VoiceSession {
         systemInstruction: this.cfg.systemInstruction,
         tools: [{ functionDeclarations: toFunctionDeclarations(this.cfg.tools) }],
         outputAudioTranscription: {},
-        inputAudioTranscription: {},
+        inputAudioTranscription: {
+          ...(this.cfg.inputLanguages?.length ? { languageCodes: this.cfg.inputLanguages } : {}),
+          ...(this.cfg.inputVocabulary?.length ? { customVocabulary: this.cfg.inputVocabulary } : {}),
+        },
         realtimeInputConfig: this.cfg.manualActivity
           ? { automaticActivityDetection: { disabled: true } }
           : {
