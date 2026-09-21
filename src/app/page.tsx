@@ -607,6 +607,19 @@ export default function Session() {
       // The rest of that turn is gone for good, and the clock has now counted
       // it as passed — so none of it may be quoted as heard by a later cut.
       spoken.current = [];
+      /**
+       * Let the board move again. The hold froze it so the pen stopped where
+       * the voice did; the half-written line has already been cut short, so
+       * restarting cannot finish it.
+       *
+       * This was missing, and only `carryOn` ever restarted the clock. After
+       * a real interruption every later op was applied at the frozen instant
+       * and could not animate — the teacher was told it was on the board, the
+       * student saw nothing — until some stray blip went through `carryOn`
+       * and everything that had queued up drew at once. Phantom blips used to
+       * do that every few seconds, which is what hid it.
+       */
+      scene.clock.start();
       dropped.forEach((d, i) => {
         wake.drop(d.callId);
         // Tell the model the chalk never moved. Otherwise it believes it drew
