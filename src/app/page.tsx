@@ -61,6 +61,18 @@ const COMMIT_SPEECH_MS = 260;
 /** Mic audio held back so the start of an utterance is never clipped. */
 const PREROLL_MS = 320;
 /**
+ * At the moment of committing, the last voiced frame must be no older than
+ * this — i.e. the student is still talking, not trailing off inside the hang
+ * window that keeps `speaking` true after they stop.
+ */
+const VOICE_RECENT_MS = 120;
+/**
+ * And they must have been voicing for at least this long. Below it, nothing is
+ * a word: a click, a chair, a breath, or the residue of the teacher's own
+ * voice. Measured from a failing session, the phantom turns ran 10-81ms.
+ */
+const MIN_VOICED_MS = 160;
+/**
  * How far above the LEARNED echo the student has to be.
  *
  * This used to be a fixed fraction of the speaker output, which is a guess
@@ -545,6 +557,12 @@ export default function Session() {
        * real, because the cost of being wrong is a sentence and the cost of
        * the alternative is ignoring the student.
        */
+      // Too short to be a word at all — never escalate that to taking the
+      // turn, whatever else is true about it.
+      if (Math.max(0, v.lastVoice - v.startedAt) < MIN_VOICED_MS) {
+        carryOn('too short to be speech');
+        return;
+      }
       if (committed && verdict.isBackchannel && verdict.via === 'duration') {
         takeTheTurn(`${verdict.reason}, but committed`);
         return;
@@ -781,16 +799,36 @@ export default function Session() {
           v.speaking = true;
           v.startedAt = now;
           lastHeard.current = '';
-          // Tell the server only once this looks like real speech. A blip that
-          // ends first is never reported, so it cannot interrupt the teacher.
+          /**
+           * Tell the server only once this really is speech.
+           *
+           * `speaking` is NOT the test for that, and using it alone is how a
+           * silent room committed turn after turn. It stays true through the
+           * whole hang window after the last voiced frame — 320ms — which
+           * outlives this 260ms timer, so ten milliseconds of a chair creaking
+           * was still "speaking" when the timer checked and went to the server
+           * as a student turn. It came back transcribed as "¿Qué?".
+           *
+           * The two things that actually distinguish a word from a click: the
+           * student is STILL voicing when we look, and they have been voicing
+           * long enough for it to be a word. Re-armed rather than abandoned,
+           * so a real sentence with a breath in it still commits.
+           */
           window.clearTimeout(commitTimer.current);
-          commitTimer.current = window.setTimeout(() => {
-            if (!vad.current.speaking || streaming.current) return;
-            streaming.current = true;
-            session.activityStart();
-            for (const chunk of preroll.current) session.sendAudio(chunk);
-            preroll.current = [];
-          }, COMMIT_SPEECH_MS);
+          const tryCommit = () => {
+            const s = vad.current;
+            if (streaming.current || !s.speaking) return;
+            const voicedFor = s.lastVoice - s.startedAt;
+            if (performance.now() - s.lastVoice <= VOICE_RECENT_MS && voicedFor >= MIN_VOICED_MS) {
+              streaming.current = true;
+              session.activityStart();
+              for (const chunk of preroll.current) session.sendAudio(chunk);
+              preroll.current = [];
+              return;
+            }
+            commitTimer.current = window.setTimeout(tryCommit, 60);
+          };
+          commitTimer.current = window.setTimeout(tryCommit, COMMIT_SPEECH_MS);
           // HOLD: stop the voice and freeze the pen mid-stroke immediately,
           // without waiting for the server to confirm the interruption.
           if (speakingRef.current && !heldRef.current) {
