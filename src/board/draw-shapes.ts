@@ -23,6 +23,20 @@
  */
 import { splitAll } from './chalk/subpaths';
 import { arcD, arrowD, dashedD, inkOf, SVG_NS, type Ink } from './templates/primitives';
+import {
+  chargeD,
+  componentD,
+  curveArrowD,
+  curveD,
+  dimensionD,
+  fieldD,
+  groundD,
+  springD,
+  triangleD,
+  turnD,
+  waveD,
+  type Component,
+} from './shape-paths';
 import type { Pt } from './units';
 import rough from 'roughjs';
 
@@ -35,7 +49,19 @@ export type Shape =
   | 'dot'
   | 'label'
   | 'angle'
-  | 'link';
+  | 'link'
+  | 'curve'
+  | 'curvearrow'
+  | 'turn'
+  | 'wave'
+  | 'spring'
+  | 'field'
+  | 'dimension'
+  | 'ground'
+  | 'triangle'
+  | 'shade'
+  | 'charge'
+  | Component;
 
 export const SHAPES: Shape[] = [
   'arrow',
@@ -47,6 +73,24 @@ export const SHAPES: Shape[] = [
   'label',
   'angle',
   'link',
+  'curve',
+  'curvearrow',
+  'turn',
+  'wave',
+  'spring',
+  'field',
+  'dimension',
+  'ground',
+  'triangle',
+  'shade',
+  'charge',
+  'resistor',
+  'cell',
+  'capacitor',
+  'bulb',
+  'switch',
+  'inductor',
+  'meter',
 ];
 
 export interface ShapeSpec {
@@ -57,6 +101,8 @@ export interface ShapeSpec {
   to2?: Pt | null;
   text?: string;
   colour?: Ink;
+  /** A count, where a shape has one: coils, cycles, field arrows. Negative turns clockwise. */
+  n?: number;
 }
 
 export interface BuiltShape {
@@ -79,13 +125,6 @@ function roughen(d: string, roughness = 0.9): string[] {
 }
 
 
-/**
- * Build one primitive, hidden, ready for an animation to reveal it.
- *
- * A shape whose second point is missing degrades rather than throwing — a
- * `line` with no `to` becomes a dot at `from`. The teacher is mid-sentence;
- * nothing here is allowed to be an exception.
- */
 /** Greek letters by the names the model writes them in, as they should read on a board. */
 const GREEK: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', eta: 'η', theta: 'θ',
@@ -122,6 +161,13 @@ export function setLabel(t: SVGTextElement, text: string) {
   }
 }
 
+/**
+ * Build one primitive, hidden, ready for an animation to reveal it.
+ *
+ * A shape whose second point is missing degrades rather than throwing — a
+ * `line` with no `to` becomes a dot at `from`. The teacher is mid-sentence;
+ * nothing here is allowed to be an exception.
+ */
 export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
   const g = document.createElementNS(SVG_NS, 'g');
   g.setAttribute('data-draw', id);
@@ -147,8 +193,111 @@ export function buildShape(id: string, spec: ShapeSpec): BuiltShape {
 
   const a = spec.from;
   const b = spec.to ?? null;
+  const c = spec.to2 ?? null;
+
+  /** Words on a shape — fade in, like every label. */
+  const words = (at: Pt, text: string, size = 30, italic = true) => {
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', String(at.x));
+    t.setAttribute('y', String(at.y));
+    t.setAttribute('fill', stroke);
+    t.setAttribute('font-size', String(size));
+    if (italic) t.setAttribute('font-style', 'italic');
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'central');
+    setLabel(t, text);
+    t.style.opacity = '0';
+    g.appendChild(t);
+    fades.push(t);
+  };
+  /** Strokes, lightly roughened — a symbol has to stay the symbol it is. */
+  const chalk = (ds: string[], roughness: number, width = 3) => {
+    for (const d of ds) for (const piece of roughen(d, roughness)) path(piece, width);
+  };
 
   switch (spec.shape) {
+    case 'curve':
+      if (b) chalk([curveD(a, b, c)], 0.6);
+      break;
+
+    case 'curvearrow':
+      if (b) chalk([curveArrowD(a, b, c)], 0.5, 3.5);
+      break;
+
+    case 'turn':
+      chalk([turnD(a, b ?? { x: a.x + 60, y: a.y }, (spec.n ?? 1) < 0)], 0.5, 3.5);
+      if (spec.text) words({ x: a.x, y: a.y }, spec.text);
+      break;
+
+    case 'wave':
+      if (b) chalk([waveD(a, b, spec.n)], 0.3);
+      break;
+
+    case 'spring':
+      if (b) chalk([springD(a, b, spec.n)], 0.3);
+      break;
+
+    case 'field':
+      if (b) chalk(fieldD(a, b, spec.n), 0.5, 3);
+      break;
+
+    case 'dimension':
+      if (b) {
+        const dim = dimensionD(a, b);
+        chalk(dim.d, 0.3, 2.5);
+        if (spec.text) words(dim.label, spec.text);
+      }
+      break;
+
+    case 'ground':
+      if (b) chalk(groundD(a, b), 0.5, 3);
+      break;
+
+    case 'triangle':
+      if (b && c) chalk([triangleD(a, b, c)], 0.7, 3.5);
+      break;
+
+    case 'shade': {
+      // A hatched region — the area under a graph, a solid's cross-section.
+      // Hachure strokes only, no outline: the region's edges are usually
+      // already on the board, and a shaded area is lighter than a line.
+      const pts = c && b ? [a, b, c] : b ? [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }] : null;
+      if (pts) {
+        const sets = gen.toPaths(
+          gen.polygon(pts.map((p) => [p.x, p.y] as [number, number]), {
+            fill: stroke,
+            fillStyle: 'hachure',
+            hachureGap: 14,
+            hachureAngle: -41,
+            fillWeight: 2,
+            stroke: 'none',
+            roughness: 0.8,
+          }),
+        );
+        for (const d of splitAll(sets.map((p) => p.d))) path(d, 2).setAttribute('stroke-opacity', '0.6');
+      }
+      break;
+    }
+
+    case 'charge':
+      chalk(chargeD(a, /^[-−–]/.test(spec.text ?? '') ? '-' : '+'), 0.3, 3);
+      break;
+
+    case 'resistor':
+    case 'cell':
+    case 'capacitor':
+    case 'bulb':
+    case 'switch':
+    case 'inductor':
+    case 'meter':
+      if (b) {
+        const part = componentD(spec.shape, a, b);
+        chalk(part.d, 0.35, 3);
+        if (spec.shape === 'meter') words(part.centre, spec.text || 'A', 26, false);
+        else if (spec.text) words(part.label, spec.text, 26);
+      }
+      break;
+
     case 'arrow':
       if (b) for (const d of roughen(arrowD(a, b), 0.6)) path(d, 4);
       break;

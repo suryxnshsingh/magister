@@ -113,6 +113,8 @@ export interface DrawOp extends Common {
   text?: string;
   /** An ink name — see `INKS`. */
   colour?: string;
+  /** A count, where a shape has one: coils, cycles, field arrows. Negative turns clockwise. */
+  n?: number;
 }
 
 export interface EraseOp extends Common {

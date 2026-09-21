@@ -235,6 +235,7 @@ export class Scene {
       to2: to2?.pt ?? null,
       text: op.text,
       colour: op.colour ? asInk(op.colour) : undefined,
+      n: op.n,
     });
     this.layers.figures.appendChild(built.group);
     this.drawings.set(op.id, built.group);

@@ -44,6 +44,22 @@ const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String
 
 const MARK_STYLES: MarkStyle[] = ['underline', 'circle', 'strike', 'box', 'cancel'];
 
+/** Shapes drawn between two points, which are nothing without the second. */
+const NEEDS_TO = new Set([
+  'arrow', 'line', 'dashed', 'link', 'angle', 'curve', 'curvearrow', 'wave', 'spring', 'field',
+  'dimension', 'ground', 'shade', 'resistor', 'cell', 'capacitor', 'bulb', 'switch', 'inductor', 'meter',
+]);
+
+/** A count as the model sends it — a number, or a direction for a turn. */
+function countOf(raw: string): number | undefined {
+  const t = raw.trim().toLowerCase();
+  if (!t) return undefined;
+  if (/anti|counter/.test(t)) return 1;
+  if (/clock/.test(t)) return -1;
+  const n = Number(t);
+  return Number.isFinite(n) && n !== 0 ? n : undefined;
+}
+
 /** Every id still on the board, in the order the teacher put them there. */
 function liveIds(scene: Scene): string[] {
   return [...scene.objects.keys(), ...scene.drawings.keys(), ...scene.figures.keys()].filter(
@@ -232,6 +248,18 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           },
         };
       }
+      // A shape that needs a second or third point and was not given one
+      // draws nothing — say so now, while the model can still add it.
+      const needs = shape === 'triangle' ? ['to', 'to2'] : NEEDS_TO.has(shape) ? ['to'] : [];
+      const missing = needs.filter((k) => !str(a[k]));
+      if (missing.length) {
+        return {
+          ops: [],
+          resume: false,
+          note: `draw ${shape} -> missing ${missing.join(', ')}`,
+          response: { ok: false, error: `a ${shape} needs ${missing.join(' and ')} — nothing was drawn` },
+        };
+      }
       const a0 = scene.anchorOf(from);
       return {
         ops: [{
@@ -244,6 +272,7 @@ export function dispatch(call: ToolCall, scene: Scene, now: number): DispatchRes
           to2: str(a.to2) || undefined,
           text: str(a.text) || undefined,
           colour: asInk(str(a.colour)),
+          n: countOf(str(a.n)),
         }],
         resume: false,
         note: `draw ${shape} ${id}`,
