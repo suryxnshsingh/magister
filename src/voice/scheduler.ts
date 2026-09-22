@@ -22,6 +22,17 @@ import type { ToolCall } from './session';
 const OUTPUT_RATE = 24_000;
 const msToSamples = (ms: number) => Math.round((ms / 1000) * OUTPUT_RATE);
 
+/**
+ * How far one call of a batch may be pushed past the first. Spacing a batch
+ * is about order and one stroke at a time, not about waiting for every write
+ * to finish: measured batches run to seven calls, and spacing each by its full
+ * duration put the last one 6.6s past its anchor — near the end of the words
+ * it was about, against a lead of 5–13s.
+ */
+const STAGGER_CAP_MS = 4000;
+/** The most any one call holds up the next. */
+const STAGGER_STEP_MS = 1500;
+
 export interface Scheduled {
   call: ToolCall;
   /** Playback position, in output samples, at which this should fire. */
@@ -49,8 +60,8 @@ export class OpScheduler {
   private queue: Scheduled[] = [];
   private turnStartPlayed = 0;
   private lastPlayed = 0;
-  /** The last staggered call: the anchor it shared, and when its chalk is free. */
-  private batch: { anchor: number; until: number } | null = null;
+  /** The batch being spaced: its anchor, where its first call fired, and when the chalk is next free. */
+  private batch: { anchor: number; start: number; until: number } | null = null;
 
   constructor(
     private fire: (call: ToolCall) => void,
@@ -97,8 +108,13 @@ export class OpScheduler {
      * sent them. `busyMs` of zero opts out — an erase keeps its early place.
      */
     if (busyMs > 0) {
-      if (this.batch && this.batch.anchor === call.anchorSamples) fireAt = Math.max(fireAt, this.batch.until);
-      this.batch = { anchor: call.anchorSamples, until: fireAt + msToSamples(busyMs) };
+      const same = this.batch && this.batch.anchor === call.anchorSamples ? this.batch : null;
+      if (same) fireAt = Math.max(fireAt, Math.min(same.until, same.start + msToSamples(STAGGER_CAP_MS)));
+      this.batch = {
+        anchor: call.anchorSamples,
+        start: same ? same.start : fireAt,
+        until: fireAt + msToSamples(Math.min(busyMs, STAGGER_STEP_MS)),
+      };
     }
     this.queue.push({ call, fireAt, enqueuedAt: performance.now() });
     this.queue.sort((a, b) => a.fireAt - b.fireAt);

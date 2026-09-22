@@ -60,3 +60,16 @@ test('an erase sent with new work keeps its place ahead of it', () => {
   s.tick(96_000);
   assert.deepEqual(fired, ['erase', 'write']);
 });
+
+test('a long batch is spread out, but never so far that it leaves its words behind', () => {
+  // Seven calls in one message, as measured: four shapes, then three writes.
+  const at = [];
+  const s = new OpScheduler((c) => at.push(c.callId));
+  s.markTurnStart(0);
+  const busy = [650, 650, 650, 650, 2000, 2000, 2000];
+  busy.forEach((ms, i) => s.enqueue(call(`c${i}`, 48_000), 0, ms));
+  const fireAt = s.pending.map((p) => (p.fireAt - 48_000) / 24);
+  assert.deepEqual(s.pending.map((p) => p.call.callId), busy.map((_, i) => `c${i}`), 'in the order sent');
+  assert.ok(Math.max(...fireAt) <= 4000, `the last call waits ${Math.max(...fireAt)}ms`);
+  assert.equal(new Set(fireAt.slice(0, 5)).size, 5, 'the first five do not land together');
+});
