@@ -28,7 +28,6 @@ import { classifyInterruption } from '@/teacher/backchannel';
 import { MIN_VOICED_MS, ONSET_WINDOW_MS, SpeechGate } from '@/voice/gate';
 import { Wakeup } from '@/voice/wake';
 import { busyMs, startEarlyMs } from '@/teacher/pacing';
-import { TEACHER_PROMPT, TEACHER_TOOLS } from '@/teacher/tools';
 import { SPOKEN_TEACHER_PROMPT, SPOKEN_TOOLS } from '@/teacher/scribe';
 import { PHYSICS_VOCABULARY, STUDENT_LANGUAGES } from '@/teacher/hearing';
 import { Scribe, isScribeCall } from '@/voice/scribe';
@@ -461,14 +460,6 @@ export default function Session() {
       }, SNAPSHOT_QUIET_MS);
     };
 
-    /**
-     * The live model talks while the scribe — a fast text model reading its
-     * transcript — holds the chalk (see `teacher/scribe.ts`). This is the
-     * production path at `/`; `?track=one` keeps the old combined teacher
-     * available as a deliberate rollback and comparison path.
-     */
-    const twoTrack = new URLSearchParams(window.location.search).get('track') !== 'one';
-
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
       for (const op of r.ops) {
@@ -484,7 +475,7 @@ export default function Session() {
         // answer. The scribe is told what failed, on its next request.
         const res = r.response as { ok?: boolean; error?: string };
         if (res.ok === false) {
-          scribe?.failure(`${call.name} ${JSON.stringify(call.args)}: ${res.error ?? 'failed'}`);
+          scribe.failure(`${call.name} ${JSON.stringify(call.args)}: ${res.error ?? 'failed'}`);
         }
         return;
       }
@@ -519,32 +510,30 @@ export default function Session() {
     /** The model finished a generation: if it ended on board calls, it is waiting on them. */
     const generationOver = () => {
       // The teacher has finished: its last words are a sentence now.
-      scribe?.end();
+      scribe.end();
       const waiting = wake.turnComplete();
       // Drawn now, not after a lead-in for speech that is never coming.
       if (waiting.length) sched.release(waiting);
     };
     schedRef.current = sched;
 
-    const scribe = twoTrack
-      ? new Scribe({
-          ask: (req) =>
-            fetch('/api/scribe', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(req),
-            }).then((res) => res.json()),
-          board: () => boardSummary(scene),
-          pending: () =>
-            sched.pending
-              .filter((p) => isScribeCall(p.call))
-              .map((p) => `${p.call.name} ${JSON.stringify(p.call.args)}`),
-          // Already on the word it belongs to: no need to start early.
-          place: (call) => sched.enqueue(call, 0, busyMs(call.name, call.args)),
-          note: (text) => push('system', text),
-        })
-      : null;
-    if (scribe) push('system', 'two-track: the teacher talks, the scribe holds the chalk');
+    const scribe = new Scribe({
+      ask: (req) =>
+        fetch('/api/scribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(req),
+        }).then((res) => res.json()),
+      board: () => boardSummary(scene),
+      pending: () =>
+        sched.pending
+          .filter((p) => isScribeCall(p.call))
+          .map((p) => `${p.call.name} ${JSON.stringify(p.call.args)}`),
+      // Already on the word it belongs to: no need to start early.
+      place: (call) => sched.enqueue(call, 0, busyMs(call.name, call.args)),
+      note: (text) => push('system', text),
+    });
+    push('system', 'the teacher talks; the scribe holds the chalk');
 
     /**
      * Let the queued sentence carry on — the student was only nodding.
@@ -613,7 +602,7 @@ export default function Session() {
       // Only the live model's own calls are answered; the scribe's are just dropped.
       const dropped = all.filter((d) => !isScribeCall(d));
       io.flush();
-      scribe?.cut(heard);
+      scribe.cut(heard);
       // The rest of that turn is gone for good, and the clock has now counted
       // it as passed — so none of it may be quoted as heard by a later cut.
       spoken.current = [];
@@ -741,8 +730,8 @@ export default function Session() {
     const session = new GeminiLiveSession(
       {
         model: MODEL,
-        systemInstruction: twoTrack ? SPOKEN_TEACHER_PROMPT : TEACHER_PROMPT,
-        tools: twoTrack ? SPOKEN_TOOLS : TEACHER_TOOLS,
+        systemInstruction: SPOKEN_TEACHER_PROMPT,
+        tools: SPOKEN_TOOLS,
         /**
          * WE own turn boundaries, not the server.
          *
@@ -789,7 +778,7 @@ export default function Session() {
         transcript: (c) => {
           if (c.role === 'model') {
             spoken.current.push({ text: c.text, atSamples: c.atSamples });
-            scribe?.hear(c.text, c.atSamples);
+            scribe.hear(c.text, c.atSamples);
           }
           if (c.role === 'user') lastHeard.current += ` ${c.text}`;
           push(c.role === 'model' ? 'teacher' : 'student', c.text);
