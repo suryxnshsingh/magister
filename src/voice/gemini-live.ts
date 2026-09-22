@@ -70,6 +70,8 @@ export class GeminiLiveSession implements VoiceSession {
   /** Total output samples received. The anchor space for board ops. */
   private received = 0;
   private seenCalls = new Map<string, number>();
+  /** We closed it ourselves — the student ended the lesson. */
+  private closing = false;
 
   constructor(
     private cfg: SessionConfig,
@@ -135,7 +137,18 @@ export class GeminiLiveSession implements VoiceSession {
           this.setState('error', e.message);
           this.events.error?.(e.message);
         },
-        onclose: () => this.setState('closed'),
+        /**
+         * Say why, when it was not us. The server ends sessions for reasons a
+         * student needs to hear — "Your project has exceeded its monthly
+         * spending cap" arrives as close code 1011 — and dropping the reason
+         * left a lesson that simply stopped, or sat on "thinking" for ever.
+         */
+        onclose: (e: CloseEvent) => {
+          if (!this.closing) {
+            this.events.error?.(`the connection closed (${e.code}${e.reason ? `: ${e.reason}` : ''})`);
+          }
+          this.setState('closed', e.reason || undefined);
+        },
       },
     });
   }
@@ -329,6 +342,7 @@ export class GeminiLiveSession implements VoiceSession {
   }
 
   close() {
+    this.closing = true;
     this.session?.close();
     this.session = null;
     this.setState('idle');

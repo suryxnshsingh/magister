@@ -208,6 +208,8 @@ export default function Session() {
    * The gate now stays up, saying so, until audio can actually reach the model.
    */
   const [phase, setPhase] = useState<'idle' | 'starting' | 'live'>('idle');
+  /** Why the last lesson ended, when it was not the student ending it — shown on the gate. */
+  const [endedWith, setEndedWith] = useState('');
   const active = phase === 'live';
   const [state, setState] = useState<SessionState>('idle');
   const penRef = useRef<SVGGElement>(null);
@@ -332,6 +334,7 @@ export default function Session() {
 
   const start = useCallback(async () => {
     if (phase !== 'idle') return;
+    setEndedWith('');
     setPhase('starting');
     // Explicit, because nothing else reports it until the socket opens — and
     // the gap is exactly when a student starts talking too early.
@@ -873,7 +876,10 @@ export default function Session() {
           sched.cancel(ids);
           ids.forEach((id) => wake.drop(id));
         },
-        error: (m) => push('system', `error: ${m}`),
+        error: (m) => {
+          push('system', `error: ${m}`);
+          setEndedWith(m);
+        },
       },
       () => io.clock.played,
     );
@@ -1483,6 +1489,14 @@ export default function Session() {
             >
               opening the mic and the line — wait for the teacher
             </span>
+            {/* Why the last lesson stopped, when the student did not stop it —
+                a spending cap, a dropped line. Otherwise a lesson that ends
+                on its own just looks broken. */}
+            {phase === 'idle' && endedWith && (
+              <span className="max-w-[440px] text-center text-[13px]" style={{ color: 'var(--ember)' }}>
+                The last lesson stopped: {endedWith}
+              </span>
+            )}
 
             {/* The board the student just built is the thing they take away.
                 It only appears once there is one, and only while idle, so it
