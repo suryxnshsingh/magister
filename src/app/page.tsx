@@ -462,13 +462,12 @@ export default function Session() {
     };
 
     /**
-     * Two tracks, or one. With `?track=two` the live model only talks, and
-     * the scribe — a fast text model reading its transcript — holds the chalk
-     * (see `teacher/scribe.ts`). Without it, the live model does both, as it
-     * always has. Chosen per lesson so the two can be compared on the same
-     * material.
+     * The live model talks while the scribe — a fast text model reading its
+     * transcript — holds the chalk (see `teacher/scribe.ts`). This is the
+     * production path at `/`; `?track=one` keeps the old combined teacher
+     * available as a deliberate rollback and comparison path.
      */
-    const twoTrack = new URLSearchParams(window.location.search).get('track') === 'two';
+    const twoTrack = new URLSearchParams(window.location.search).get('track') !== 'one';
 
     const sched = new OpScheduler((call) => {
       const r = dispatch(call, scene, scene.clock.time);
