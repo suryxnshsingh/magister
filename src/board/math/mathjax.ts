@@ -23,8 +23,42 @@ import { RegisterHTMLHandler } from '@mathjax/src/mjs/handlers/html.js';
 // built from direct mjs imports does not have — it throws "an asynchronous
 // action is required" instead of loading anything.
 import '@mathjax/src/mjs/input/tex/ams/AmsConfiguration.js';
+import '@mathjax/src/mjs/input/tex/amscd/AmsCdConfiguration.js';
+import '@mathjax/src/mjs/input/tex/boldsymbol/BoldsymbolConfiguration.js';
+import '@mathjax/src/mjs/input/tex/braket/BraketConfiguration.js';
+import '@mathjax/src/mjs/input/tex/cancel/CancelConfiguration.js';
+import '@mathjax/src/mjs/input/tex/centernot/CenternotConfiguration.js';
 import '@mathjax/src/mjs/input/tex/color/ColorConfiguration.js';
+import '@mathjax/src/mjs/input/tex/configmacros/ConfigMacrosConfiguration.js';
+import '@mathjax/src/mjs/input/tex/enclose/EncloseConfiguration.js';
+import '@mathjax/src/mjs/input/tex/extpfeil/ExtpfeilConfiguration.js';
+import '@mathjax/src/mjs/input/tex/gensymb/GensymbConfiguration.js';
+import '@mathjax/src/mjs/input/tex/mathtools/MathtoolsConfiguration.js';
+import '@mathjax/src/mjs/input/tex/mhchem/MhchemConfiguration.js';
 import '@mathjax/src/mjs/input/tex/physics/PhysicsConfiguration.js';
+import '@mathjax/src/mjs/input/tex/textcomp/TextcompConfiguration.js';
+import '@mathjax/src/mjs/input/tex/textmacros/TextMacrosConfiguration.js';
+import '@mathjax/src/mjs/input/tex/unicode/UnicodeConfiguration.js';
+import '@mathjax/src/mjs/input/tex/upgreek/UpgreekConfiguration.js';
+// Glyph ranges the font would otherwise fetch the first time they are used —
+// see PRELOADED below. Importing a file registers its glyphs; nothing more.
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/symbols.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/symbols-b-i.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/math.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/arrows.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/marrows.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/shapes.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/mshapes.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/variants.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/accents.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/calligraphic.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/double-struck.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/fraktur.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/script.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/sans-serif.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/monospace.js';
+import '@mathjax/mathjax-newcm-font/mjs/svg/dynamic/latin.js';
+import { KATEX_MACROS } from './katex-macros';
 
 import { PX_PER_UNIT } from '../units';
 
@@ -51,10 +85,43 @@ export const DEFAULT_EM = 0.44;
 let adaptorRef: ReturnType<typeof liteAdaptor> | null = null;
 let docRef: ReturnType<typeof mathjax.document> | null = null;
 
+/**
+ * The font's glyph ranges that must be present before anything is typeset.
+ *
+ * MathJax 4's font keeps most of its symbols in separate files and fetches
+ * one the first time a character from it is needed — asynchronously. This
+ * module typesets synchronously (the chalk needs the paths the moment a line
+ * is placed), so every such character failed with "an asynchronous action is
+ * required": ⊥, ℓ, ✓, ∮, ⇌, every \mathbb, \mathcal, \mathfrak letter. The
+ * files a physics board needs are imported above and installed here, once,
+ * so those glyphs are simply there. Scripts a physics board does not write —
+ * Arabic, Cherokee, Braille, extended Greek and Latin — are left out.
+ */
+const PRELOADED = [
+  'symbols', 'symbols-b-i', 'math', 'arrows', 'marrows', 'shapes', 'mshapes', 'variants', 'accents',
+  'calligraphic', 'double-struck', 'fraktur', 'script', 'sans-serif', 'monospace',
+  // Accented Latin letters: Schrödinger, Ångström, and accents in \text.
+  'latin',
+];
+
+type DynamicFile = { setup: (font: unknown) => void; promise: Promise<void> | null };
+
+function installGlyphs(font: unknown) {
+  const files = (font as { CLASS: { dynamicFiles: Record<string, DynamicFile> } }).CLASS.dynamicFiles;
+  for (const name of PRELOADED) {
+    const file = files[name];
+    if (!file) continue;
+    file.setup(font);
+    // Marked loaded, so MathJax never goes looking for it.
+    file.promise = Promise.resolve();
+  }
+}
+
 function ensureDoc() {
   if (docRef && adaptorRef) return { doc: docRef, adaptor: adaptorRef };
   const adaptor = liteAdaptor();
   RegisterHTMLHandler(adaptor);
+  const svg = new SVG({ fontCache: 'none' });
   const doc = mathjax.document('', {
     // `physics` is the notation this subject is written in — a vector with an
     // arrow over it, a derivative that is not a fraction of two letters — and
@@ -71,15 +138,28 @@ function ensureDoc() {
     // error message itself, on a filled background — which rectsToPaths
     // faithfully turned into a slab of white chalk across the board, with
     // "Undefined control sequence \implies" written on it.
+    //
+    // The rest are for parity with KaTeX — anything KaTeX typesets should
+    // reach the board (scripts/katex-parity.mjs holds this to account):
+    // \cancel, \boldsymbol, \ce for nuclear equations, \degree, braket
+    // notation, extensible arrows, \coloneqq and cases from mathtools,
+    // commutative diagrams, accents inside \text, and KaTeX's own
+    // shorthands (katex-macros.ts) through configmacros.
     InputJax: new TeX({
-      packages: ['base', 'ams', 'color', 'physics'],
+      packages: [
+        'base', 'ams', 'amscd', 'boldsymbol', 'braket', 'cancel', 'centernot', 'color', 'configmacros',
+        'enclose', 'extpfeil', 'gensymb', 'mathtools', 'mhchem', 'physics', 'textcomp', 'textmacros',
+        'unicode', 'upgreek',
+      ],
+      macros: KATEX_MACROS,
       formatError: (_jax: unknown, err: Error) => {
         throw err;
       },
     }),
     // The one setting this module exists to enforce.
-    OutputJax: new SVG({ fontCache: 'none' }),
+    OutputJax: svg,
   });
+  installGlyphs(svg.font);
   adaptorRef = adaptor;
   docRef = doc;
   return { doc, adaptor };

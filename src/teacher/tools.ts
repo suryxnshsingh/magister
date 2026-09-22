@@ -34,7 +34,11 @@ export const TEACHER_TOOLS: ToolDeclaration[] = [
       'fractions as frac(numerator, denominator), powers as u^2, subscripts as u_x, ' +
       'multiplication as *. Vectors as vec(F), unit vectors as hat(n), ' +
       'derivatives as dv(x,t) and pdv(u,x) — use them, a vector should look ' +
-      'like a vector. To colour symbols the way they are coloured on the diagram, ' +
+      'like a vector. Sums and integrals by name, limits in brackets: ' +
+      'sum_(i=1)^N m_i r_i^2, int_0^R r^2 dm, oint, lim_(t->0), infinity, partial, ' +
+      'nabla, approx, propto, pm, 30 deg; a group in a power or subscript in ' +
+      'brackets: e^(-t/tau), r_(cm). Words inside maths go in text(...). ' +
+      'To colour symbols the way they are coloured on the diagram, ' +
       'list them in colours — the content itself stays plain. ' +
       'Example: "$u_x = u cos(theta) = 17.3 m/s$". ' +
       'Example: "$R = frac(u^2 sin(2 theta), g)$". ' +
