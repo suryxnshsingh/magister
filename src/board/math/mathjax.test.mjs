@@ -96,3 +96,33 @@ test('symbols are coloured from a list beside the line, never from markup in it'
   const tex = toTypesettable(out);
   assert.ok(tex.includes(`\\textcolor{${INKS.blue}}{N}`) && tex.includes(`\\textcolor{${INKS.red}}{mg}`), tex);
 });
+
+test('sums, integrals and the rest of the notation are symbols, not letters', () => {
+  // The two lines from the board: "summ_i r_i^2" and "intr^2 dm".
+  const sum = normaliseMath('I = sum m_i r_i^2').latex;
+  assert.match(sum, /\\sum\s*m_i r_i\^2/, sum);
+  const int = normaliseMath('I = int r^2 dm').latex;
+  assert.match(int, /\\int\s*r\^2 \\,dm/, int);
+  // With their limits, in brackets or not.
+  assert.match(normaliseMath('sum_(i=1)^N m_i').latex, /\\sum\s*_\{i=1\}\^N/);
+  assert.match(normaliseMath('int_0^R x dx').latex, /\\int\s*_0\^R x \\,dx/);
+  assert.match(normaliseMath('lim_(x->0) sin(x)/x').latex, /\\lim\s*_\{x \\to 0\}/);
+  assert.match(normaliseMath('q = q_0 e^(-t/tau)').latex, /e\^\{-t\/\\tau\s*\}/);
+  // Symbols by name, and the Greek that was missing.
+  for (const [plain, tex] of [['infinity', 'infty'], ['partial', 'partial'], ['approx', 'approx'], ['propto', 'propto'], ['pm', 'pm'], ['2 pi r', 'pi'], ['theta_1', 'theta'], ['omega_0', 'omega']]) {
+    assert.match(normaliseMath(plain).latex, new RegExp(`\\\\${tex}`), plain);
+  }
+  assert.match(normaliseMath('theta = 30 deg').latex, /30\^\\circ/);
+  // Leftover English is words; short algebra stays algebra.
+  assert.match(normaliseMath('I = total current').latex, /\\text\{ total current \}/);
+  assert.equal(normaliseMath('E = mgh').latex, 'E = mgh');
+  assert.equal(normaliseMath('v = u + at').latex, 'v = u + at');
+  // And nothing inside words set as words is touched.
+  assert.match(normaliseMath('text(sum of pi values)').latex, /\\text\{ sum of pi values \}/);
+  // Every one of them typesets.
+  for (const line of ['I = sum m_i r_i^2', 'I = int r^2 dm', 'lim_(x->0) sin(x)/x', 'q = q_0 e^(-t/tau)', 'I = total current', 'x approx 2 pi r']) {
+    const tex = toTypesettable(`$${line}$`);
+    measure(tex);
+    assert.equal(typesetProblem(tex), null, `${line} -> ${tex}`);
+  }
+});

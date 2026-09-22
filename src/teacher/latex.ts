@@ -32,9 +32,30 @@
 const GREEK = [
   'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta',
   'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'rho', 'sigma', 'tau',
-  'phi', 'chi', 'psi', 'omega',
-  'Gamma', 'Delta', 'Theta', 'Lambda', 'Sigma', 'Phi', 'Psi', 'Omega',
+  'phi', 'chi', 'psi', 'omega', 'pi', 'upsilon',
+  'varphi', 'vartheta', 'varepsilon',
+  'Gamma', 'Delta', 'Theta', 'Lambda', 'Sigma', 'Phi', 'Psi', 'Omega', 'Pi', 'Xi', 'Upsilon',
 ];
+
+/**
+ * The rest of a physics board's notation, by the plain names a model types —
+ * each the LaTeX it stands for.
+ *
+ * The model is told never to use a backslash, so whatever it cannot say in
+ * plain notation it writes as a bare word — and a bare word in maths is not an
+ * error, it is a product of italic letters. "sum m_i r_i^2" went up as
+ * s·u·m·m_i r_i², "int r^2 dm" as i·n·t·r² dm, with nothing anywhere to say so.
+ * This list is that vocabulary; `write`'s description teaches it.
+ */
+const SYMBOLS: Record<string, string> = {
+  sum: '\\sum', prod: '\\prod', int: '\\int', iint: '\\iint', iiint: '\\iiint', oint: '\\oint',
+  lim: '\\lim', infinity: '\\infty', infty: '\\infty', inf: '\\infty',
+  partial: '\\partial', nabla: '\\nabla', grad: '\\nabla',
+  approx: '\\approx', propto: '\\propto', pm: '\\pm', mp: '\\mp', cdot: '\\cdot', times: '\\times',
+  neq: '\\neq', leq: '\\leq', geq: '\\geq', ll: '\\ll', gg: '\\gg', sim: '\\sim', equiv: '\\equiv',
+  perp: '\\perp', parallel: '\\parallel', therefore: '\\therefore', because: '\\because',
+  hbar: '\\hbar', ell: '\\ell',
+};
 
 const FUNCS = ['sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'log', 'ln', 'exp', 'max', 'min'];
 
@@ -135,6 +156,10 @@ function plainToLatex(src: string): string {
   // otherwise it goes up as italic letters run together, "text(sameinseries)".
   s = replaceCalls(s, 'text', ([a]) => `\\text{ ${(a ?? '').replace(/[{}\\]/g, '')} }`);
 
+  // A sub- or superscript in brackets is one group: sum_(i=1)^N, e^(-t/tau),
+  // lim_(x->0), r_(cm). Without this TeX takes only the "(".
+  s = s.replace(/([_^])\(([^()]*)\)/g, '$1{$2}');
+
   for (const f of FUNCS) {
     // sin(2 theta) is written "sin 2θ", but sin(omega t + phi) must keep its
     // brackets — without them it reads as (sin ωt) + φ, a different function.
@@ -180,10 +205,37 @@ function plainToLatex(src: string): string {
     s = s.replace(new RegExp(`(?<!\\\\)\\b${f}\\b(?!\\{)`, 'g'), `\\${f} `);
   }
 
-  // Greek names. Word-boundary only, so "theta" converts but "thetas" does not.
+  // Words already set as words — text(...) — are not notation, and a "pi" or
+  // "sum" inside one must stay a word. Held aside until the words are done.
+  const held: string[] = [];
+  s = s.replace(/\\text\{[^}]*\}/g, (m) => {
+    held.push(m);
+    return `\u0000${held.length - 1}\u0000`;
+  });
+
+  // Greek names, as whole names: "theta" converts but "thetas" does not. A
+  // script may follow — theta_1, omega_0 — and "_" counting as part of a word
+  // is what used to leave those as italic letters.
   for (const g of GREEK) {
-    s = s.replace(new RegExp(`(?<!\\\\)\\b${g}\\b`, 'g'), `\\${g} `);
+    s = s.replace(new RegExp(`(?<![\\\\A-Za-z0-9])${g}(?![A-Za-z0-9])`, 'g'), `\\${g} `);
   }
+
+  // Operators and symbols by name — sum, int, lim, infinity, partial, approx.
+  for (const [name, tex] of Object.entries(SYMBOLS)) {
+    s = s.replace(new RegExp(`(?<![\\\\\\w])${name}(?![A-Za-z0-9])`, 'g'), `${tex} `);
+  }
+  // Degrees after a number: 30 deg.
+  s = s.replace(/(\d)\s*deg(?:rees?)?\b/g, '$1^\\circ');
+  // The d of an integral stands a little apart from what it integrates.
+  if (/\\i*int|\\oint/.test(s)) s = s.replace(/(^|[\s}])d([a-zA-Z])(?![\w])/g, '$1\\,d$2');
+
+  // Whatever English is left in the maths is words, not a product of
+  // letters: "I = total current" goes up as the words. A run counts when any
+  // word in it is four letters or more — "mgh" and "at" stay algebra.
+  s = s.replace(/(?<![\\\w{_^#\u0000])[A-Za-z]+(?:[ ]+[A-Za-z]+)*(?![\w(])/g, (run) =>
+    run.split(/\s+/).some((w) => w.length >= 4) ? `\\text{ ${run} }` : run,
+  );
+  s = s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => held[Number(i)]);
 
   // Arrows and comparisons, as they are typed. Longest first, so "<=>" is not
   // read as "<=" and ">".
